@@ -10,6 +10,7 @@ import SegmentEditor from './components/SegmentEditor';
 import ExportModal from './components/ExportModal';
 import GuidelinesModal from './components/GuidelinesModal';
 import ProjectsModal from './components/ProjectsModal';
+import { API_BASE } from './config';
 
 export default function App() {
   const [showGuidelines, setShowGuidelines] = useState(false);
@@ -55,7 +56,7 @@ export default function App() {
 
   const fetchHealth = async () => {
     try {
-      const res = await fetch('/api/health');
+      const res = await fetch(`${API_BASE}/api/health`);
       if (res.ok) {
         const data = await res.json();
         setHasApiKey(data.has_gemini_api_key);
@@ -168,7 +169,7 @@ export default function App() {
     formData.append('script', targetScript);
 
     try {
-      const res = await fetch('/api/transcribe', {
+      const res = await fetch(`${API_BASE}/api/transcribe`, {
         method: 'POST',
         body: formData
       });
@@ -209,7 +210,7 @@ export default function App() {
 
   const handleLint = async (updatedSegments) => {
     try {
-      const res = await fetch('/api/lint', {
+      const res = await fetch(`${API_BASE}/api/lint`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -275,7 +276,7 @@ export default function App() {
         }
       };
 
-      const res = await fetch('/api/export/multi', {
+      const res = await fetch(`${API_BASE}/api/export/multi`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -314,7 +315,7 @@ export default function App() {
   const fetchProjects = async () => {
     setIsLoadingProjects(true);
     try {
-      const res = await fetch('/api/projects');
+      const res = await fetch(`${API_BASE}/api/projects`);
       if (res.ok) {
         const data = await res.json();
         setSavedProjects(data.projects || []);
@@ -354,7 +355,7 @@ export default function App() {
         }
       };
 
-      const res = await fetch('/api/projects/save', {
+      const res = await fetch(`${API_BASE}/api/projects/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ result: payloadResult })
@@ -373,7 +374,7 @@ export default function App() {
 
   const handleLoadProject = async (projectId) => {
     try {
-      const res = await fetch(`/api/projects/${projectId}`);
+      const res = await fetch(`${API_BASE}/api/projects/${projectId}`);
       if (res.ok) {
         const data = await res.json();
         setTranscriptionResult(data);
@@ -387,7 +388,7 @@ export default function App() {
           setActiveSegmentId(data.segments[0].segment_id);
         }
         if (data.filename) {
-          setAudioUrl(`/api/audio/${data.filename}`);
+          setAudioUrl(`${API_BASE}/api/audio/${data.filename}`);
         }
         setDbSaveToast(`Loaded: ${data.filename}`);
         setTimeout(() => setDbSaveToast(''), 3500);
@@ -400,7 +401,7 @@ export default function App() {
   const handleDeleteProject = async (projectId) => {
     if (!window.confirm("Are you sure you want to delete this project from Neon DB?")) return;
     try {
-      const res = await fetch(`/api/projects/${projectId}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/api/projects/${projectId}`, { method: 'DELETE' });
       if (res.ok) {
         setSavedProjects((prev) => prev.filter((p) => p.id !== projectId));
       }
