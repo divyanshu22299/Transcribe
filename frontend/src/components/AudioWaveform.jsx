@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import WaveSurfer from 'wavesurfer.js';
+import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.esm.js';
 import {
-  Play, Pause, Square, RotateCcw, RotateCw, Volume2, VolumeX, ZoomIn, ZoomOut, Repeat, Music, X
+  Play, Pause, Square, RotateCcw, RotateCw, Volume2, VolumeX, ZoomIn, ZoomOut, Repeat, MoveHorizontal, Sliders
 } from 'lucide-react';
 
 export default function AudioWaveform({
@@ -9,22 +10,27 @@ export default function AudioWaveform({
   segments,
   currentSegmentId,
   onSegmentClick,
+  onSegmentTimeChange,
   onTimeUpdate,
   playTargetTime
 }) {
   const containerRef = useRef(null);
+  const scrollWrapperRef = useRef(null);
   const wavesurferRef = useRef(null);
+  const regionsPluginRef = useRef(null);
   const activeLoopRef = useRef(null); // { start: number, end: number, isLooping: boolean, segId?: number }
+  const isUpdatingRegionsFromProps = useRef(false);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1.0);
-  const [zoomLevel, setZoomLevel] = useState(25);
+  const [zoomLevel, setZoomLevel] = useState(30); // px per second
   const [isLoopingSegment, setIsLoopingSegment] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [activeLoopDisplay, setActiveLoopDisplay] = useState(null);
+  const [draggedRegionInfo, setDraggedRegionInfo] = useState(null); // Live tooltip while dragging
 
   // Core loop enforcer function (Only active when isLoopingSegment is true)
   const enforceLoop = useCallback((time) => {
@@ -92,6 +98,7 @@ export default function AudioWaveform({
     }
   }, [playTargetTime, isReady]);
 
+  // Initialize WaveSurfer with continuous natural waveform and Regions plugin
   useEffect(() => {
     if (!containerRef.current || !audioUrl) return;
 
@@ -102,19 +109,51 @@ export default function AudioWaveform({
       } catch (e) {}
     }
 
+    const wsRegions = RegionsPlugin.create();
+    regionsPluginRef.current = wsRegions;
+
     const ws = WaveSurfer.create({
       container: containerRef.current,
-      waveColor: '#cbd5e1',      // Slate-300
-      progressColor: '#4f46e5',  // Indigo-600
-      cursorColor: '#0f172a',    // Slate-900
+      // Continuous true audio wavelength (curves, no histogram bars)
+      waveColor: 'rgba(99, 102, 241, 0.45)',    // Indigo wave
+      progressColor: '#4338ca',                 // Deep Indigo progress fill
+      cursorColor: '#ef4444',                   // Bright Red playback line
       cursorWidth: 2,
-      barWidth: 2,
-      barGap: 1.5,
-      barRadius: 2,
-      height: 48,                // Ultra-compact 48px height
+      height: 76,                               // Spacious, clear wavelength
       normalize: true,
+      autoScroll: true,
+      autoCenter: true,
       minPxPerSec: zoomLevel,
       url: audioUrl,
+      plugins: [wsRegions]
+    });
+
+    // Handle Region drag & resize events (Subtitle Edit style direct timeline editing)
+    wsRegions.on('region-updated', (region) => {
+      if (isUpdatingRegionsFromProps.current) return;
+      const segId = parseInt(region.id, 10);
+      const newStart = Math.max(0, Math.round(region.start * 1000) / 1000);
+      const newEnd = Math.max(newStart + 0.1, Math.round(region.end * 1000) / 1000);
+
+      setDraggedRegionInfo({
+        segId: segId,
+        start: newStart,
+        end: newEnd,
+        duration: Math.round((newEnd - newStart) * 1000) / 1000
+      });
+
+      if (onSegmentTimeChange && !isNaN(segId)) {
+        onSegmentTimeChange(segId, newStart, newEnd);
+      }
+    });
+
+    wsRegions.on('region-clicked', (region, e) => {
+      e.stopPropagation();
+      const segId = parseInt(region.id, 10);
+      if (onSegmentClick && segments) {
+        const seg = segments.find((s) => s.segment_id === segId);
+        if (seg) onSegmentClick(seg);
+      }
     });
 
     ws.on('ready', () => {
@@ -160,9 +199,51 @@ export default function AudioWaveform({
         ws.destroy();
       } catch (e) {}
       wavesurferRef.current = null;
+      regionsPluginRef.current = null;
     };
   }, [audioUrl, enforceLoop]);
 
+  // Synchronize on-waveform shaded segment regions (Shadows) with segments data
+  useEffect(() => {
+    const wsRegions = regionsPluginRef.current;
+    if (!isReady || !wsRegions || !segments || segments.length === 0) return;
+
+    isUpdatingRegionsFromProps.current = true;
+    try {
+      wsRegions.clearRegions();
+
+      segments.forEach((seg) => {
+        const isCurrent = seg.segment_id === currentSegmentId;
+        const isSpeaker1 = seg.speaker === 'Speaker 1';
+
+        // Speaker and Active State Shadow Colors
+        let shadowColor = 'rgba(59, 130, 246, 0.22)'; // Blue shadow for Speaker 1
+        if (isCurrent) {
+          shadowColor = 'rgba(245, 158, 11, 0.38)'; // Highlighted Amber shadow for active segment
+        } else if (!isSpeaker1) {
+          shadowColor = 'rgba(16, 185, 129, 0.22)'; // Emerald shadow for Speaker 2
+        }
+
+        wsRegions.addRegion({
+          id: String(seg.segment_id),
+          start: Math.max(0, seg.start_time),
+          end: Math.max(seg.start_time + 0.1, seg.end_time),
+          content: `#${seg.segment_id} ${seg.speaker || ''}`,
+          color: shadowColor,
+          drag: true,    // Enable dragging the entire shadow
+          resize: true,  // Enable dragging the starting/ending edges
+        });
+      });
+    } catch (err) {
+      console.error("Failed to render shaded regions:", err);
+    } finally {
+      setTimeout(() => {
+        isUpdatingRegionsFromProps.current = false;
+      }, 50);
+    }
+  }, [segments, currentSegmentId, isReady]);
+
+  // Zoom control
   useEffect(() => {
     if (isReady && wavesurferRef.current) {
       try {
@@ -171,6 +252,7 @@ export default function AudioWaveform({
     }
   }, [zoomLevel, isReady]);
 
+  // Playback rate
   useEffect(() => {
     if (isReady && wavesurferRef.current) {
       try {
@@ -179,6 +261,7 @@ export default function AudioWaveform({
     }
   }, [playbackRate, isReady]);
 
+  // Mute control
   useEffect(() => {
     if (isReady && wavesurferRef.current) {
       try {
@@ -203,10 +286,9 @@ export default function AudioWaveform({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isReady]);
 
-  // 1. PLAY BUTTON AT BOTTOM OF WAVELENGTH: Plays the ENTIRE audio continuously
+  // 1. PLAY BUTTON: Plays the ENTIRE audio continuously
   const toggleGlobalPlay = () => {
     if (isReady && wavesurferRef.current) {
-      // Clear segment loop mode so it plays the entire audio continuously
       activeLoopRef.current = null;
       setActiveLoopDisplay(null);
       setIsLoopingSegment(false);
@@ -217,7 +299,7 @@ export default function AudioWaveform({
     }
   };
 
-  // Dedicated Stop Button on Main Waveform: Pauses and teleports marker to 00:00.000 (Start of entire audio)
+  // Dedicated Stop Button: Pauses and teleports marker to 00:00.000 (Start of entire audio)
   const stopAndReset = () => {
     if (isReady && wavesurferRef.current) {
       try {
@@ -249,31 +331,6 @@ export default function AudioWaveform({
     }
   };
 
-  // 2. SEGMENT LOOP PLAY: Plays only this specific segment in continuous loop
-  const playSegmentLoop = (start, end, segId) => {
-    if (isReady && wavesurferRef.current) {
-      try {
-        const s = parseFloat(start);
-        const e = parseFloat(end);
-        activeLoopRef.current = {
-          start: s,
-          end: e,
-          isLooping: true,
-          segId: segId
-        };
-        setActiveLoopDisplay({
-          start: s,
-          end: e,
-          segId: segId
-        });
-        setIsLoopingSegment(true);
-        wavesurferRef.current.setTime(s);
-        wavesurferRef.current.play();
-        setIsPlaying(true);
-      } catch (err) {}
-    }
-  };
-
   const formatTime = (secs) => {
     const m = Math.floor(secs / 60);
     const s = Math.floor(secs % 60);
@@ -281,46 +338,37 @@ export default function AudioWaveform({
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
   };
 
+  // Mouse wheel horizontal scroll handler
+  const handleWaveformWheel = (e) => {
+    if (scrollWrapperRef.current) {
+      // Horizontal scroll
+      scrollWrapperRef.current.scrollLeft += e.deltaY;
+    }
+  };
+
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-2.5 shadow-xs transition-all">
-      {/* Waveform Canvas Container (Ultra Compact) */}
-      <div className="relative bg-slate-900/5 rounded-lg p-2 border border-slate-200/80 mb-2 overflow-hidden">
-        <div ref={containerRef} className="cursor-pointer" />
-        
-        {/* Speaker Timeline Ribbon */}
-        {duration > 0 && segments && segments.length > 0 && (
-          <div className="relative w-full h-2 mt-1.5 flex bg-slate-200 rounded overflow-hidden">
-            {segments.map((seg) => {
-              const leftPct = (seg.start_time / duration) * 100;
-              const widthPct = ((seg.end_time - seg.start_time) / duration) * 100;
-              const isCurrent = seg.segment_id === currentSegmentId;
-              const isSpeaker1 = seg.speaker === 'Speaker 1';
-
-              return (
-                <div
-                  key={seg.segment_id}
-                  onClick={() => {
-                    playSegmentLoop(seg.start_time, seg.end_time, seg.segment_id);
-                    if (onSegmentClick) onSegmentClick(seg);
-                  }}
-                  title={`Segment #${seg.segment_id}: ${seg.speaker} (${formatTime(seg.start_time)} - ${formatTime(seg.end_time)})`}
-                  style={{
-                    left: `${leftPct}%`,
-                    width: `${Math.max(0.5, widthPct)}%`,
-                    position: 'absolute'
-                  }}
-                  className={`h-full cursor-pointer transition-all ${
-                    isCurrent
-                      ? 'bg-amber-500 ring-2 ring-amber-400 z-10'
-                      : isSpeaker1
-                      ? 'bg-indigo-500 hover:bg-indigo-600'
-                      : 'bg-emerald-500 hover:bg-emerald-600'
-                  }`}
-                />
-              );
-            })}
+      {/* Waveform Canvas Container with Interactive Drag Shadow Overlays & Horizontal Scroll */}
+      <div 
+        ref={scrollWrapperRef}
+        onWheel={handleWaveformWheel}
+        className="relative bg-slate-950/5 rounded-xl p-2 border border-slate-200/80 mb-2 overflow-x-auto shadow-inner select-none"
+      >
+        {/* Live Drag & Edit Tooltip */}
+        {draggedRegionInfo && (
+          <div className="absolute top-2 right-3 z-30 bg-slate-900/90 text-white text-[11px] font-mono font-bold px-2.5 py-1 rounded-md shadow-lg border border-slate-700 flex items-center gap-2 pointer-events-none animate-in fade-in">
+            <MoveHorizontal className="w-3.5 h-3.5 text-amber-400" />
+            <span>#{draggedRegionInfo.segId}</span>
+            <span className="text-amber-300">{formatTime(draggedRegionInfo.start)}</span>
+            <span className="text-slate-400">➔</span>
+            <span className="text-amber-300">{formatTime(draggedRegionInfo.end)}</span>
+            <span className="bg-slate-800 text-slate-300 px-1.5 py-0.2 rounded text-[10px]">
+              {draggedRegionInfo.duration.toFixed(3)}s
+            </span>
           </div>
         )}
+
+        <div ref={containerRef} className="cursor-pointer min-w-full" />
       </div>
 
       {/* Transport Controls Bar (Sleek Single Line) */}
@@ -415,18 +463,32 @@ export default function AudioWaveform({
 
         {/* Right: Zoom & Volume */}
         <div className="flex items-center gap-2">
+          {/* Scroll / Zoom Controls */}
           <div className="flex items-center gap-1 text-[11px] text-slate-500 bg-slate-100 px-2 py-1 rounded-lg border border-slate-200">
-            <ZoomOut className="w-3 h-3 text-slate-400" />
+            <button 
+              onClick={() => setZoomLevel(Math.max(10, zoomLevel - 10))}
+              title="Zoom Out (Scroll wider)"
+              className="hover:text-slate-900 cursor-pointer"
+            >
+              <ZoomOut className="w-3 h-3" />
+            </button>
             <input
               type="range"
               min="10"
-              max="120"
+              max="150"
               value={zoomLevel}
               onChange={(e) => setZoomLevel(Number(e.target.value))}
               className="w-16 accent-indigo-600 cursor-pointer h-1 bg-slate-200 rounded"
-              title="Zoom Level"
+              title={`Zoom: ${zoomLevel}px/s (Use mouse wheel to scroll horizontally)`}
             />
-            <ZoomIn className="w-3 h-3 text-slate-400" />
+            <button 
+              onClick={() => setZoomLevel(Math.min(150, zoomLevel + 10))}
+              title="Zoom In (Scroll closer)"
+              className="hover:text-slate-900 cursor-pointer"
+            >
+              <ZoomIn className="w-3 h-3" />
+            </button>
+            <span className="font-mono text-[10px] text-slate-400 pl-0.5">{zoomLevel}x</span>
           </div>
 
           <button

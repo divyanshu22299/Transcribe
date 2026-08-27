@@ -30,3 +30,47 @@
 input:focus, textarea:focus, select:focus {
   outline: none;
 }
+
+/* Subtitle Edit style WaveSurfer Region Shadows */
+.wavesurfer-region {
+  border-radius: 4px;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  overflow: visible !important;
+  cursor: grab;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+.wavesurfer-region:active {
+  cursor: grabbing;
+}
+
+.wavesurfer-handle {
+  width: 5px !important;
+  background-color: rgba(99, 102, 241, 0.8) !important;
+  cursor: ew-resize !important;
+  transition: all 0.15s ease;
+  z-index: 10;
+}
+
+.wavesurfer-handle:hover, .wavesurfer-handle:active {
+  width: 8px !important;
+  background-color: #d97706 !important;
+  box-shadow: 0 0 8px rgba(217, 119, 6, 0.5);
+}
+
+.wavesurfer-region [data-region-content] {
+  font-size: 10px;
+  font-weight: 700;
+  color: #0f172a;
+  padding: 1px 5px;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 4px;
+  border: 1px solid rgba(203, 213, 225, 0.9);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  pointer-events: none;
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+}

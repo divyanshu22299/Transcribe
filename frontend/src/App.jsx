@@ -410,6 +410,34 @@ export default function App() {
     }
   };
 
+  const handleSegmentTimeChange = (segId, newStart, newEnd) => {
+    const formatTimeStr = (secs) => {
+      const m = Math.floor(secs / 60);
+      const s = Math.floor(secs % 60);
+      const ms = Math.floor((secs % 1) * 1000);
+      return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+    };
+
+    setSegments((prevSegments) => {
+      const updated = prevSegments.map((s) => {
+        if (s.segment_id === segId) {
+          const s_time = Math.max(0, Math.round(newStart * 1000) / 1000);
+          const e_time = Math.max(s_time + 0.1, Math.round(newEnd * 1000) / 1000);
+          return {
+            ...s,
+            start_time: s_time,
+            end_time: e_time,
+            duration: Math.round((e_time - s_time) * 1000) / 1000,
+            start_time_str: formatTimeStr(s_time),
+            end_time_str: formatTimeStr(e_time)
+          };
+        }
+        return s;
+      });
+      return updated;
+    });
+  };
+
   return (
     <div className="min-h-screen bg-slate-100/60 text-slate-900 flex flex-col font-sans">
       {/* Top Navbar (Ultra Compact) */}
@@ -627,6 +655,7 @@ export default function App() {
               segments={segments}
               currentSegmentId={activeSegmentId}
               onSegmentClick={(seg) => setActiveSegmentId(seg.segment_id)}
+              onSegmentTimeChange={handleSegmentTimeChange}
               playTargetTime={playTargetTime}
             />
           ) : (
