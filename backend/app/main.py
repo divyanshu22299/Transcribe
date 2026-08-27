@@ -49,7 +49,21 @@ app.add_middleware(
 active_sessions = {}
 
 
+@app.get("/")
+@app.head("/")
+def root_endpoint():
+    """Root health check for UptimeRobot, Render health checks & load balancers."""
+    return {
+        "status": "healthy",
+        "service": "Karya Conversational Audio Transcription Studio",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "health": "/api/health"
+    }
+
+
 @app.get("/api/health")
+@app.head("/api/health")
 async def health_check():
     has_api_key = bool(GEMINI_API_KEY and len(GEMINI_API_KEY.strip()) > 5)
     return {
