@@ -208,3 +208,50 @@ def test_audio_rejection_evaluator():
     finally:
         if Path(temp_wav).exists():
             Path(temp_wav).unlink()
+
+
+def test_dialogue_aware_subtask_chunking():
+    from app.audio_processor import find_dialogue_split_points, extract_audio_slice
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+        temp_wav = f.name
+
+    try:
+        sr = 16000
+        # Create a 200-second synthetic audio with silence gaps at ~100s
+        t = np.linspace(0, 200, sr * 200, endpoint=False)
+        # Speech tone
+        signal = 0.3 * np.sin(2 * np.pi * 440 * t)
+        # Add 1.5-second dialogue silence gap between 98s and 102s
+        silence_idx_s = int(98.5 * sr)
+        silence_idx_e = int(101.5 * sr)
+        signal[silence_idx_s:silence_idx_e] = 0.0
+
+        sf.write(temp_wav, signal.astype(np.float32), sr)
+
+        chunks = find_dialogue_split_points(
+            temp_wav,
+            target_chunk_sec=100.0,
+            min_chunk_sec=70.0,
+            max_chunk_sec=140.0
+        )
+        assert len(chunks) == 2
+        # Verify chunk 1 ends in the silence gap (between 98s and 102s)
+        assert 98.0 <= chunks[0][1] <= 102.0
+        # Verify chunk 2 starts exactly where chunk 1 ends
+        assert chunks[1][0] == chunks[0][1]
+        assert chunks[1][1] == 200.0
+
+        # Verify extract_audio_slice
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f_slice:
+            slice_path = f_slice.name
+        try:
+            extract_audio_slice(temp_wav, chunks[0][0], chunks[0][1], slice_path)
+            slice_info = sf.info(slice_path)
+            assert round(slice_info.duration, 1) == round(chunks[0][1] - chunks[0][0], 1)
+        finally:
+            if Path(slice_path).exists():
+                Path(slice_path).unlink()
+    finally:
+        if Path(temp_wav).exists():
+            Path(temp_wav).unlink()

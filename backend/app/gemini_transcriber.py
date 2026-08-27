@@ -6,10 +6,13 @@ from typing import List, Dict, Any, Optional
 from google import genai
 from google.genai import types
 
-from app.config import GEMINI_API_KEY, GEMINI_MODEL, MAX_SEGMENT_DURATION, MIN_SEGMENT_DURATION
+from app.config import GEMINI_API_KEY, GEMINI_MODEL, MAX_SEGMENT_DURATION, MIN_SEGMENT_DURATION, UPLOAD_DIR
 from app.models import Segment, TranscriptionResult, AudioAnalysis, WordConfidence
-from app.audio_processor import format_timestamp, detect_speech_boundaries, inspect_audio, snap_to_acoustic_boundaries
 from app.linter_engine import lint_dataset
+from app.audio_processor import (
+    format_timestamp, detect_speech_boundaries, inspect_audio,
+    snap_to_acoustic_boundaries, find_dialogue_split_points, extract_audio_slice
+)
 
 SYSTEM_INSTRUCTION = """You are an expert conversational speech transcriptionist and acoustic annotator adhering strictly to the official Karya Verbatim Transcription & Segmentation Guidelines.
 
@@ -291,8 +294,8 @@ def process_audio_file(
     model_name: Optional[str] = None
 ) -> TranscriptionResult:
     """
-    Complete pipeline: Audio inspection, Gemini transcription with language auto-detection,
-    post-processing, Karya compliance linting, and score computation.
+    Complete pipeline: Audio inspection, dialogue-aware 2-minute subtask chunking for long audio,
+    Gemini transcription with language auto-detection, acoustic snapping, Karya compliance linting.
     """
     import uuid
 
@@ -305,71 +308,124 @@ def process_audio_file(
     audio_info.is_rejected = False
     audio_info.rejection_category = None
     audio_info.rejection_reason = None
+    total_duration = audio_info.duration
 
-    # Step 2: Call Gemini multimodal transcriber with auto-detection
-    raw_segments = []
     resolved_language = language
     resolved_script = script
+    raw_chunks_segments = []
 
-    try:
-        data = transcribe_audio_with_gemini(
-            audio_path=audio_path,
-            language=language,
-            script=script,
-            api_key=api_key,
-            model_name=model_name
+    # Step 2: Determine if chunking is needed (Split if duration > 150s / 2.5 minutes)
+    if total_duration > 150.0:
+        # Partition into clean 2-minute chunks strictly at natural dialogue silence breaks
+        chunks = find_dialogue_split_points(
+            audio_path,
+            target_chunk_sec=120.0,
+            min_chunk_sec=80.0,
+            max_chunk_sec=160.0
         )
-        raw_segments = data.get("segments", [])
-        if language in ["Auto-Detect", "auto", "Auto"]:
-            resolved_language = data.get("detected_language", "Hindi")
-        if script in ["Auto-Detect", "auto", "Auto"]:
-            resolved_script = data.get("detected_script", "Devanagari")
-    except Exception as e:
-        # Re-raise error with clear message if transcription fails completely
-        raise RuntimeError(f"Transcription failed: {str(e)}")
+        print(f"Dividing {total_duration:.1f}s audio into {len(chunks)} dialogue-aware subtask chunks...")
 
-    # Step 3: Normalize and build Segment objects
+        for chunk_idx, (chunk_s, chunk_e) in enumerate(chunks, 1):
+            slice_filename = f"temp_chunk_{audio_id}_{chunk_idx}.wav"
+            slice_path = UPLOAD_DIR / slice_filename
+            try:
+                extract_audio_slice(audio_path, chunk_s, chunk_e, str(slice_path))
+                chunk_data = transcribe_audio_with_gemini(
+                    audio_path=str(slice_path),
+                    language=resolved_language,
+                    script=resolved_script,
+                    api_key=api_key,
+                    model_name=model_name
+                )
+                if language in ["Auto-Detect", "auto", "Auto"] and chunk_idx == 1:
+                    resolved_language = chunk_data.get("detected_language", "Hindi")
+                if script in ["Auto-Detect", "auto", "Auto"] and chunk_idx == 1:
+                    resolved_script = chunk_data.get("detected_script", "Devanagari")
+
+                for raw_seg in chunk_data.get("segments", []):
+                    raw_chunks_segments.append({
+                        "raw": raw_seg,
+                        "chunk_offset": chunk_s
+                    })
+            finally:
+                if slice_path.exists():
+                    try:
+                        slice_path.unlink()
+                    except Exception:
+                        pass
+    else:
+        # Single-pass transcription for short audio (<= 150s)
+        try:
+            data = transcribe_audio_with_gemini(
+                audio_path=audio_path,
+                language=language,
+                script=script,
+                api_key=api_key,
+                model_name=model_name
+            )
+            if language in ["Auto-Detect", "auto", "Auto"]:
+                resolved_language = data.get("detected_language", "Hindi")
+            if script in ["Auto-Detect", "auto", "Auto"]:
+                resolved_script = data.get("detected_script", "Devanagari")
+
+            for raw_seg in data.get("segments", []):
+                raw_chunks_segments.append({
+                    "raw": raw_seg,
+                    "chunk_offset": 0.0
+                })
+        except Exception as e:
+            raise RuntimeError(f"Transcription failed: {str(e)}")
+
+    # Step 3: Build & Calibrate Segment Objects with Exact Global Timestamps
     segments: List[Segment] = []
     prev_end = 0.0
 
-    for i, raw in enumerate(raw_segments, 1):
-        s_time = float(raw.get("start_time", prev_end))
-        e_time = float(raw.get("end_time", s_time + 2.0))
+    for i, item in enumerate(raw_chunks_segments, 1):
+        raw = item["raw"]
+        chunk_offset = item["chunk_offset"]
 
-        # Acoustic waveform boundary calibration (100% accurate physical onset/offset)
+        # Shift relative chunk timestamps to absolute audio timeline
+        raw_s = float(raw.get("start_time", 0.0))
+        raw_e = float(raw.get("end_time", raw_s + 2.0))
+        s_time = chunk_offset + raw_s
+        e_time = chunk_offset + raw_e
+
+        # Exact physical acoustic onset & decay snapping on the audio waveform
         try:
             s_time, e_time = snap_to_acoustic_boundaries(audio_path, s_time, e_time)
         except Exception:
             pass
 
-        # Ensure non-overlapping
+        # Guarantee non-overlapping
         if s_time < prev_end:
             s_time = prev_end
         if e_time <= s_time:
             e_time = s_time + 0.5
-            
+
         s_time = round(s_time, 3)
         e_time = round(e_time, 3)
         duration = round(e_time - s_time, 3)
-        
+
         speaker = str(raw.get("speaker", "Speaker 1")).strip()
         gender = str(raw.get("gender", "Male")).capitalize()
         if gender not in ["Male", "Female", "Unknown"]:
             gender = "Unknown"
-            
+
         transcript = str(raw.get("transcript", "")).strip()
 
-        # Parse or construct WordConfidence objects for editor heatmap
+        # Build word confidence data with absolute timeline offsets
         words_list: List[WordConfidence] = []
         raw_words = raw.get("words", [])
         if raw_words and isinstance(raw_words, list):
             for w in raw_words:
                 if isinstance(w, dict) and "word" in w:
+                    w_s = float(w["start_time"]) + chunk_offset if w.get("start_time") is not None else None
+                    w_e = float(w["end_time"]) + chunk_offset if w.get("end_time") is not None else None
                     words_list.append(WordConfidence(
                         word=str(w["word"]),
                         confidence=float(w.get("confidence", 0.95)),
-                        start_time=float(w.get("start_time")) if w.get("start_time") is not None else None,
-                        end_time=float(w.get("end_time")) if w.get("end_time") is not None else None
+                        start_time=round(w_s, 3) if w_s is not None else None,
+                        end_time=round(w_e, 3) if w_e is not None else None
                     ))
         if not words_list and transcript:
             tokens = transcript.split()

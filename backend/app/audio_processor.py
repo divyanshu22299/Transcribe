@@ -330,3 +330,129 @@ def snap_to_acoustic_boundaries(
         return round(refined_start, 3), round(refined_end, 3)
     except Exception:
         return round(raw_start, 3), round(raw_end, 3)
+
+
+def find_dialogue_split_points(
+    audio_path: str,
+    target_chunk_sec: float = 120.0,   # ~2 minutes
+    min_chunk_sec: float = 80.0,       # at least 1m 20s
+    max_chunk_sec: float = 160.0       # at most 2m 40s
+) -> List[Tuple[float, float]]:
+    """
+    Partitions a long audio file into 2-3 minute subtask chunks.
+    CRITICAL: Splits ONLY at natural dialogue pauses / sentence completion silences
+    so that words/sentences are NEVER cut in the middle.
+    Returns list of (start_sec, end_sec) chunks covering the whole file without gaps.
+    """
+    try:
+        data, samplerate = sf.read(audio_path)
+        if len(data.shape) > 1:
+            data = np.mean(data, axis=1)  # Mono
+        total_sec = len(data) / float(samplerate)
+    except Exception:
+        info = inspect_audio(audio_path)
+        total_sec = info.get("duration", 0.0)
+        data = None
+        samplerate = 16000
+
+    # If audio is already <= max_chunk_sec, process as single chunk
+    if total_sec <= max_chunk_sec:
+        return [(0.0, round(total_sec, 3))]
+
+    if data is None or len(data) == 0:
+        chunks = []
+        cur = 0.0
+        while cur < total_sec:
+            nxt = min(total_sec, cur + target_chunk_sec)
+            chunks.append((round(cur, 3), round(nxt, 3)))
+            cur = nxt
+        return chunks
+
+    # Calculate 50ms energy frames with 10ms hop to find clean dialogue silence gaps
+    frame_len = int(samplerate * 0.05)
+    hop_len = int(samplerate * 0.01)
+    
+    energies = []
+    times = []
+    for f_idx in range(0, len(data) - frame_len, hop_len):
+        frame = data[f_idx:f_idx + frame_len]
+        rms = float(np.sqrt(np.mean(frame**2)))
+        energies.append(rms)
+        times.append(f_idx / samplerate)
+
+    energies = np.array(energies)
+    times = np.array(times)
+
+    # Estimate noise floor (20th percentile)
+    noise_floor = float(np.percentile(energies, 20))
+    peak_energy = float(np.max(energies))
+    silence_threshold = noise_floor + 0.06 * (peak_energy - noise_floor)
+
+    chunks: List[Tuple[float, float]] = []
+    cur_start = 0.0
+
+    while cur_start < total_sec:
+        if total_sec - cur_start <= max_chunk_sec:
+            chunks.append((round(cur_start, 3), round(total_sec, 3)))
+            break
+
+        # Search for clean dialogue pause in window [cur_start + min_chunk_sec, cur_start + max_chunk_sec]
+        win_s = cur_start + min_chunk_sec
+        win_e = min(total_sec, cur_start + max_chunk_sec)
+        
+        mask = (times >= win_s) & (times <= win_e)
+        candidate_indices = np.where(mask)[0]
+
+        best_split_point = cur_start + target_chunk_sec
+
+        if len(candidate_indices) > 0:
+            candidate_energies = energies[candidate_indices]
+            candidate_times = times[candidate_indices]
+
+            # Find consecutive silent frames
+            silent_mask = candidate_energies <= silence_threshold
+            best_score = float('inf')
+            run_start = None
+
+            for idx, is_sil in enumerate(silent_mask):
+                if is_sil:
+                    if run_start is None:
+                        run_start = idx
+                else:
+                    if run_start is not None:
+                        run_len = idx - run_start
+                        run_mid_time = candidate_times[(run_start + idx) // 2]
+                        dist_penalty = abs(run_mid_time - (cur_start + target_chunk_sec))
+                        sil_bonus = max(0, run_len * 0.01) * 20.0
+                        score = dist_penalty - sil_bonus
+
+                        if score < best_score:
+                            best_score = score
+                            best_split_point = run_mid_time
+                        run_start = None
+
+            if best_score == float('inf'):
+                min_idx = np.argmin(candidate_energies)
+                best_split_point = candidate_times[min_idx]
+
+        best_split_point = round(min(total_sec, max(cur_start + min_chunk_sec, best_split_point)), 3)
+        chunks.append((round(cur_start, 3), best_split_point))
+        cur_start = best_split_point
+
+    return chunks
+
+
+def extract_audio_slice(audio_path: str, start_sec: float, end_sec: float, output_path: str) -> str:
+    """Extracts an audio slice from start_sec to end_sec and saves it to output_path."""
+    try:
+        data, samplerate = sf.read(audio_path)
+        idx_s = int(max(0.0, start_sec) * samplerate)
+        idx_e = int(min(len(data) / float(samplerate), end_sec) * samplerate)
+        slice_data = data[idx_s:idx_e]
+        sf.write(output_path, slice_data, samplerate)
+        return output_path
+    except Exception:
+        sound = AudioSegment.from_file(audio_path)
+        chunk = sound[int(start_sec * 1000):int(end_sec * 1000)]
+        chunk.export(output_path, format="wav")
+        return output_path
