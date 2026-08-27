@@ -434,6 +434,14 @@ export default function App() {
         }
         return s;
       });
+
+      if (transcriptionResult) {
+        setTranscriptionResult((prevRes) => ({
+          ...prevRes,
+          segments: updated
+        }));
+      }
+
       return updated;
     });
   };

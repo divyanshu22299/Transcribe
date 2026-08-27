@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.esm.js';
 import {
-  Play, Pause, Square, RotateCcw, RotateCw, Volume2, VolumeX, ZoomIn, ZoomOut, Repeat, MoveHorizontal, Sliders
+  Play, Pause, Square, RotateCcw, RotateCw, Volume2, VolumeX, ZoomIn, ZoomOut, Repeat, MoveHorizontal
 } from 'lucide-react';
 
 export default function AudioWaveform({
@@ -18,26 +18,38 @@ export default function AudioWaveform({
   const scrollWrapperRef = useRef(null);
   const wavesurferRef = useRef(null);
   const regionsPluginRef = useRef(null);
-  const activeLoopRef = useRef(null); // { start: number, end: number, isLooping: boolean, segId?: number }
+  const activeLoopRef = useRef(null);
   const isUpdatingRegionsFromProps = useRef(false);
+
+  // Stale closure guards for external event listeners
+  const onSegmentTimeChangeRef = useRef(onSegmentTimeChange);
+  onSegmentTimeChangeRef.current = onSegmentTimeChange;
+
+  const onSegmentClickRef = useRef(onSegmentClick);
+  onSegmentClickRef.current = onSegmentClick;
+
+  const segmentsRef = useRef(segments);
+  segmentsRef.current = segments;
+
+  const currentSegmentIdRef = useRef(currentSegmentId);
+  currentSegmentIdRef.current = currentSegmentId;
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1.0);
-  const [zoomLevel, setZoomLevel] = useState(30); // px per second
+  const [zoomLevel, setZoomLevel] = useState(30);
   const [isLoopingSegment, setIsLoopingSegment] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [activeLoopDisplay, setActiveLoopDisplay] = useState(null);
-  const [draggedRegionInfo, setDraggedRegionInfo] = useState(null); // Live tooltip while dragging
+  const [draggedRegionInfo, setDraggedRegionInfo] = useState(null);
 
-  // Core loop enforcer function (Only active when isLoopingSegment is true)
+  // Core loop enforcer function
   const enforceLoop = useCallback((time) => {
     const loop = activeLoopRef.current;
     if (!loop || !loop.isLooping || !wavesurferRef.current) return;
     
-    // Strict boundary loop check
     if (time >= loop.end - 0.02 || time < loop.start - 0.2) {
       try {
         wavesurferRef.current.setTime(loop.start);
@@ -50,7 +62,7 @@ export default function AudioWaveform({
     }
   }, []);
 
-  // Handle external play/stop requests (from segment play buttons or word clicks)
+  // Handle external play/stop requests
   useEffect(() => {
     if (!playTargetTime || !isReady || !wavesurferRef.current) return;
 
@@ -69,7 +81,6 @@ export default function AudioWaveform({
         return;
       }
 
-      // If loop is requested from segment play button
       if (playTargetTime.loop) {
         activeLoopRef.current = {
           start: startTime,
@@ -84,7 +95,6 @@ export default function AudioWaveform({
         });
         setIsLoopingSegment(true);
       } else {
-        // Global play from specific time
         activeLoopRef.current = null;
         setActiveLoopDisplay(null);
         setIsLoopingSegment(false);
@@ -98,7 +108,7 @@ export default function AudioWaveform({
     }
   }, [playTargetTime, isReady]);
 
-  // Initialize WaveSurfer with continuous natural waveform and Regions plugin
+  // Initialize WaveSurfer & Regions
   useEffect(() => {
     if (!containerRef.current || !audioUrl) return;
 
@@ -114,12 +124,11 @@ export default function AudioWaveform({
 
     const ws = WaveSurfer.create({
       container: containerRef.current,
-      // Continuous true audio wavelength (curves, no histogram bars)
-      waveColor: 'rgba(99, 102, 241, 0.45)',    // Indigo wave
+      waveColor: 'rgba(99, 102, 241, 0.45)',    // Continuous Indigo wavelength
       progressColor: '#4338ca',                 // Deep Indigo progress fill
-      cursorColor: '#ef4444',                   // Bright Red playback line
+      cursorColor: '#ef4444',                   // Bright Red cursor line
       cursorWidth: 2,
-      height: 76,                               // Spacious, clear wavelength
+      height: 76,
       normalize: true,
       autoScroll: true,
       autoCenter: true,
@@ -128,10 +137,12 @@ export default function AudioWaveform({
       plugins: [wsRegions]
     });
 
-    // Handle Region drag & resize events (Subtitle Edit style direct timeline editing)
-    wsRegions.on('region-updated', (region) => {
+    // Handle Region drag & resize events
+    const handleRegionUpdate = (region) => {
       if (isUpdatingRegionsFromProps.current) return;
       const segId = parseInt(region.id, 10);
+      if (isNaN(segId)) return;
+
       const newStart = Math.max(0, Math.round(region.start * 1000) / 1000);
       const newEnd = Math.max(newStart + 0.1, Math.round(region.end * 1000) / 1000);
 
@@ -142,17 +153,24 @@ export default function AudioWaveform({
         duration: Math.round((newEnd - newStart) * 1000) / 1000
       });
 
-      if (onSegmentTimeChange && !isNaN(segId)) {
-        onSegmentTimeChange(segId, newStart, newEnd);
+      if (onSegmentTimeChangeRef.current) {
+        onSegmentTimeChangeRef.current(segId, newStart, newEnd);
       }
+    };
+
+    wsRegions.on('region-updated', handleRegionUpdate);
+
+    wsRegions.on('region-update-end', (region) => {
+      handleRegionUpdate(region);
+      setTimeout(() => setDraggedRegionInfo(null), 1500);
     });
 
     wsRegions.on('region-clicked', (region, e) => {
       e.stopPropagation();
       const segId = parseInt(region.id, 10);
-      if (onSegmentClick && segments) {
-        const seg = segments.find((s) => s.segment_id === segId);
-        if (seg) onSegmentClick(seg);
+      if (onSegmentClickRef.current && segmentsRef.current) {
+        const seg = segmentsRef.current.find((s) => s.segment_id === segId);
+        if (seg) onSegmentClickRef.current(seg);
       }
     });
 
@@ -203,39 +221,65 @@ export default function AudioWaveform({
     };
   }, [audioUrl, enforceLoop]);
 
-  // Synchronize on-waveform shaded segment regions (Shadows) with segments data
+  // Synchronize on-waveform shaded regions with latest segments data
   useEffect(() => {
     const wsRegions = regionsPluginRef.current;
     if (!isReady || !wsRegions || !segments || segments.length === 0) return;
 
     isUpdatingRegionsFromProps.current = true;
     try {
-      wsRegions.clearRegions();
+      const existingRegions = wsRegions.getRegions() || [];
+      const existingMap = new Map();
+      existingRegions.forEach((r) => existingMap.set(String(r.id), r));
 
       segments.forEach((seg) => {
+        const segIdStr = String(seg.segment_id);
         const isCurrent = seg.segment_id === currentSegmentId;
         const isSpeaker1 = seg.speaker === 'Speaker 1';
 
-        // Speaker and Active State Shadow Colors
         let shadowColor = 'rgba(59, 130, 246, 0.22)'; // Blue shadow for Speaker 1
         if (isCurrent) {
-          shadowColor = 'rgba(245, 158, 11, 0.38)'; // Highlighted Amber shadow for active segment
+          shadowColor = 'rgba(245, 158, 11, 0.42)'; // Highlighted Amber shadow for active
         } else if (!isSpeaker1) {
           shadowColor = 'rgba(16, 185, 129, 0.22)'; // Emerald shadow for Speaker 2
         }
 
-        wsRegions.addRegion({
-          id: String(seg.segment_id),
-          start: Math.max(0, seg.start_time),
-          end: Math.max(seg.start_time + 0.1, seg.end_time),
-          content: `#${seg.segment_id} ${seg.speaker || ''}`,
-          color: shadowColor,
-          drag: true,    // Enable dragging the entire shadow
-          resize: true,  // Enable dragging the starting/ending edges
-        });
+        const contentStr = `#${seg.segment_id} ${seg.speaker || ''}`;
+        const existing = existingMap.get(segIdStr);
+
+        if (existing) {
+          // If existing region needs updating
+          if (Math.abs(existing.start - seg.start_time) > 0.005) {
+            existing.start = seg.start_time;
+          }
+          if (Math.abs(existing.end - seg.end_time) > 0.005) {
+            existing.end = seg.end_time;
+          }
+          existing.setOptions({
+            color: shadowColor,
+            content: contentStr,
+            drag: true,
+            resize: true
+          });
+          existingMap.delete(segIdStr);
+        } else {
+          // Add new region
+          wsRegions.addRegion({
+            id: segIdStr,
+            start: Math.max(0, seg.start_time),
+            end: Math.max(seg.start_time + 0.1, seg.end_time),
+            content: contentStr,
+            color: shadowColor,
+            drag: true,
+            resize: true,
+          });
+        }
       });
+
+      // Remove deleted regions
+      existingMap.forEach((r) => r.remove());
     } catch (err) {
-      console.error("Failed to render shaded regions:", err);
+      console.error("Failed to sync shaded regions:", err);
     } finally {
       setTimeout(() => {
         isUpdatingRegionsFromProps.current = false;
@@ -338,10 +382,8 @@ export default function AudioWaveform({
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
   };
 
-  // Mouse wheel horizontal scroll handler
   const handleWaveformWheel = (e) => {
     if (scrollWrapperRef.current) {
-      // Horizontal scroll
       scrollWrapperRef.current.scrollLeft += e.deltaY;
     }
   };
