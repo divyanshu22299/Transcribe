@@ -1,20 +1,27 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.esm.js';
+import TimelinePlugin from 'wavesurfer.js/dist/plugins/timeline.esm.js';
+import HoverPlugin from 'wavesurfer.js/dist/plugins/hover.esm.js';
 import {
-  Play, Pause, Square, RotateCcw, RotateCw, Volume2, VolumeX, ZoomIn, ZoomOut, Repeat, MoveHorizontal
+  Play, Pause, Square, RotateCcw, RotateCw, Volume2, VolumeX, ZoomIn, ZoomOut, Repeat,
+  Scissors, GitMerge, ChevronLeft, ChevronRight, CornerDownRight, ArrowLeftToLine, ArrowRightToLine
 } from 'lucide-react';
 
 export default function AudioWaveform({
   audioUrl,
   segments,
   currentSegmentId,
+  setActiveSegmentId,
   onSegmentClick,
   onSegmentTimeChange,
+  onSplitSegment,
+  onMergeSegment,
   onTimeUpdate,
   playTargetTime
 }) {
   const containerRef = useRef(null);
+  const timelineRef = useRef(null);
   const scrollWrapperRef = useRef(null);
   const wavesurferRef = useRef(null);
   const regionsPluginRef = useRef(null);
@@ -34,16 +41,25 @@ export default function AudioWaveform({
   const currentSegmentIdRef = useRef(currentSegmentId);
   currentSegmentIdRef.current = currentSegmentId;
 
+  const onSplitSegmentRef = useRef(onSplitSegment);
+  onSplitSegmentRef.current = onSplitSegment;
+
+  const onMergeSegmentRef = useRef(onMergeSegment);
+  onMergeSegmentRef.current = onMergeSegment;
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1.0);
-  const [zoomLevel, setZoomLevel] = useState(30);
+  const [zoomLevel, setZoomLevel] = useState(35); // px per second
   const [isLoopingSegment, setIsLoopingSegment] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [activeLoopDisplay, setActiveLoopDisplay] = useState(null);
   const [draggedRegionInfo, setDraggedRegionInfo] = useState(null);
+
+  // Current active segment lookup
+  const activeSegment = (segments || []).find((s) => s.segment_id === currentSegmentId);
 
   // Core loop enforcer function
   const enforceLoop = useCallback((time) => {
@@ -108,7 +124,7 @@ export default function AudioWaveform({
     }
   }, [playTargetTime, isReady]);
 
-  // Initialize WaveSurfer & Regions
+  // Initialize WaveSurfer with Timeline & Regions
   useEffect(() => {
     if (!containerRef.current || !audioUrl) return;
 
@@ -122,22 +138,42 @@ export default function AudioWaveform({
     const wsRegions = RegionsPlugin.create();
     regionsPluginRef.current = wsRegions;
 
+    const wsTimeline = TimelinePlugin.create({
+      height: 18,
+      timeInterval: 0.5,
+      primaryLabelInterval: 5,
+      secondaryLabelInterval: 1,
+      style: {
+        fontSize: '9px',
+        color: '#64748b',
+        fontWeight: '600'
+      }
+    });
+
+    const wsHover = HoverPlugin.create({
+      lineColor: '#ef4444',
+      lineWidth: 2,
+      labelBackground: '#0f172a',
+      labelColor: '#ffffff',
+      labelSize: '10px'
+    });
+
     const ws = WaveSurfer.create({
       container: containerRef.current,
       waveColor: 'rgba(99, 102, 241, 0.45)',    // Continuous Indigo wavelength
       progressColor: '#4338ca',                 // Deep Indigo progress fill
       cursorColor: '#ef4444',                   // Bright Red cursor line
       cursorWidth: 2,
-      height: 76,
+      height: 80,
       normalize: true,
       autoScroll: true,
       autoCenter: true,
       minPxPerSec: zoomLevel,
       url: audioUrl,
-      plugins: [wsRegions]
+      plugins: [wsRegions, wsTimeline, wsHover]
     });
 
-    // Handle Region drag & resize events
+    // Handle Region drag & resize events (Subtitle Edit style direct timeline editing)
     const handleRegionUpdate = (region) => {
       if (isUpdatingRegionsFromProps.current) return;
       const segId = parseInt(region.id, 10);
@@ -244,11 +280,13 @@ export default function AudioWaveform({
           shadowColor = 'rgba(16, 185, 129, 0.22)'; // Emerald shadow for Speaker 2
         }
 
-        const contentStr = `#${seg.segment_id} ${seg.speaker || ''}`;
+        const snippet = (seg.transcript || '').trim();
+        const shortSnippet = snippet.length > 28 ? snippet.slice(0, 28) + '...' : snippet;
+        const contentStr = `#${seg.segment_id} ${seg.speaker || ''} ${shortSnippet ? `• "${shortSnippet}"` : ''}`;
+
         const existing = existingMap.get(segIdStr);
 
         if (existing) {
-          // If existing region needs updating
           if (Math.abs(existing.start - seg.start_time) > 0.005) {
             existing.start = seg.start_time;
           }
@@ -263,7 +301,6 @@ export default function AudioWaveform({
           });
           existingMap.delete(segIdStr);
         } else {
-          // Add new region
           wsRegions.addRegion({
             id: segIdStr,
             start: Math.max(0, seg.start_time),
@@ -314,21 +351,94 @@ export default function AudioWaveform({
     }
   }, [isMuted, isReady]);
 
-  // Global Keyboard Shortcuts
+  // Subtitle Edit Quick Actions
+  const handleSetStartToCursor = () => {
+    if (!activeSegment || !onSegmentTimeChangeRef.current) return;
+    const newStart = Math.min(activeSegment.end_time - 0.1, Math.max(0, Math.round(currentTime * 1000) / 1000));
+    onSegmentTimeChangeRef.current(activeSegment.segment_id, newStart, activeSegment.end_time);
+  };
+
+  const handleSetEndToCursor = () => {
+    if (!activeSegment || !onSegmentTimeChangeRef.current) return;
+    const newEnd = Math.max(activeSegment.start_time + 0.1, Math.min(duration || 9999, Math.round(currentTime * 1000) / 1000));
+    onSegmentTimeChangeRef.current(activeSegment.segment_id, activeSegment.start_time, newEnd);
+  };
+
+  const handleNudgeStart = (delta) => {
+    if (!activeSegment || !onSegmentTimeChangeRef.current) return;
+    const newStart = Math.max(0, Math.min(activeSegment.end_time - 0.1, Math.round((activeSegment.start_time + delta) * 1000) / 1000));
+    onSegmentTimeChangeRef.current(activeSegment.segment_id, newStart, activeSegment.end_time);
+  };
+
+  const handleNudgeEnd = (delta) => {
+    if (!activeSegment || !onSegmentTimeChangeRef.current) return;
+    const newEnd = Math.max(activeSegment.start_time + 0.1, Math.round((activeSegment.end_time + delta) * 1000) / 1000);
+    onSegmentTimeChangeRef.current(activeSegment.segment_id, activeSegment.start_time, newEnd);
+  };
+
+  const handlePrevSegment = () => {
+    if (!segments || segments.length === 0) return;
+    const idx = segments.findIndex((s) => s.segment_id === currentSegmentId);
+    if (idx > 0) {
+      const prev = segments[idx - 1];
+      if (setActiveSegmentId) setActiveSegmentId(prev.segment_id);
+      if (wavesurferRef.current) wavesurferRef.current.setTime(prev.start_time);
+    }
+  };
+
+  const handleNextSegment = () => {
+    if (!segments || segments.length === 0) return;
+    const idx = segments.findIndex((s) => s.segment_id === currentSegmentId);
+    if (idx !== -1 && idx < segments.length - 1) {
+      const next = segments[idx + 1];
+      if (setActiveSegmentId) setActiveSegmentId(next.segment_id);
+      if (wavesurferRef.current) wavesurferRef.current.setTime(next.start_time);
+    }
+  };
+
+  // Global Keyboard Shortcuts (Subtitle Edit style: Space, Esc, [, ], S, M, L)
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      
       if (e.code === 'Space') {
         e.preventDefault();
         toggleGlobalPlay();
       } else if (e.code === 'Escape') {
         e.preventDefault();
         stopAndReset();
+      } else if (e.key === '[') {
+        e.preventDefault();
+        handleSetStartToCursor();
+      } else if (e.key === ']') {
+        e.preventDefault();
+        handleSetEndToCursor();
+      } else if (e.key === 's' || e.key === 'S') {
+        if (onSplitSegmentRef.current && currentSegmentIdRef.current) {
+          e.preventDefault();
+          onSplitSegmentRef.current(currentSegmentIdRef.current, currentTime);
+        }
+      } else if (e.key === 'm' || e.key === 'M') {
+        if (onMergeSegmentRef.current && currentSegmentIdRef.current) {
+          e.preventDefault();
+          onMergeSegmentRef.current(currentSegmentIdRef.current);
+        }
+      } else if (e.key === 'l' || e.key === 'L') {
+        if (activeSegment) {
+          e.preventDefault();
+          playSegmentLoop(activeSegment.start_time, activeSegment.end_time, activeSegment.segment_id);
+        }
+      } else if (e.key === 'a' || e.key === 'A') {
+        e.preventDefault();
+        handlePrevSegment();
+      } else if (e.key === 'd' || e.key === 'D') {
+        e.preventDefault();
+        handleNextSegment();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isReady]);
+  }, [isReady, currentTime, activeSegment]);
 
   // 1. PLAY BUTTON: Plays the ENTIRE audio continuously
   const toggleGlobalPlay = () => {
@@ -340,6 +450,31 @@ export default function AudioWaveform({
       try {
         wavesurferRef.current.playPause();
       } catch (e) {}
+    }
+  };
+
+  // 2. SEGMENT LOOP PLAY: Plays only this specific segment in continuous loop
+  const playSegmentLoop = (start, end, segId) => {
+    if (isReady && wavesurferRef.current) {
+      try {
+        const s = parseFloat(start);
+        const e = parseFloat(end);
+        activeLoopRef.current = {
+          start: s,
+          end: e,
+          isLooping: true,
+          segId: segId
+        };
+        setActiveLoopDisplay({
+          start: s,
+          end: e,
+          segId: segId
+        });
+        setIsLoopingSegment(true);
+        wavesurferRef.current.setTime(s);
+        wavesurferRef.current.play();
+        setIsPlaying(true);
+      } catch (err) {}
     }
   };
 
@@ -389,22 +524,21 @@ export default function AudioWaveform({
   };
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-2.5 shadow-xs transition-all">
-      {/* Waveform Canvas Container with Interactive Drag Shadow Overlays & Horizontal Scroll */}
+    <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs transition-all space-y-2.5">
+      {/* 10x Studio Waveform Canvas with Integrated Millisecond Timeline Ruler & Hover Cursor */}
       <div 
         ref={scrollWrapperRef}
         onWheel={handleWaveformWheel}
-        className="relative bg-slate-950/5 rounded-xl p-2 border border-slate-200/80 mb-2 overflow-x-auto shadow-inner select-none"
+        className="relative bg-slate-950/5 rounded-xl p-2 border border-slate-200/80 overflow-x-auto shadow-inner select-none"
       >
         {/* Live Drag & Edit Tooltip */}
         {draggedRegionInfo && (
-          <div className="absolute top-2 right-3 z-30 bg-slate-900/90 text-white text-[11px] font-mono font-bold px-2.5 py-1 rounded-md shadow-lg border border-slate-700 flex items-center gap-2 pointer-events-none animate-in fade-in">
-            <MoveHorizontal className="w-3.5 h-3.5 text-amber-400" />
-            <span>#{draggedRegionInfo.segId}</span>
-            <span className="text-amber-300">{formatTime(draggedRegionInfo.start)}</span>
+          <div className="absolute top-2 right-3 z-50 bg-slate-900/95 text-white text-[11px] font-mono font-bold px-3 py-1 rounded-lg shadow-xl border border-amber-500/50 flex items-center gap-2 pointer-events-none animate-in fade-in">
+            <span className="text-amber-400 font-black">#{draggedRegionInfo.segId}</span>
+            <span className="text-emerald-300 font-bold">{formatTime(draggedRegionInfo.start)}</span>
             <span className="text-slate-400">➔</span>
-            <span className="text-amber-300">{formatTime(draggedRegionInfo.end)}</span>
-            <span className="bg-slate-800 text-slate-300 px-1.5 py-0.2 rounded text-[10px]">
+            <span className="text-rose-300 font-bold">{formatTime(draggedRegionInfo.end)}</span>
+            <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.2 rounded text-[10px]">
               {draggedRegionInfo.duration.toFixed(3)}s
             </span>
           </div>
@@ -413,9 +547,104 @@ export default function AudioWaveform({
         <div ref={containerRef} className="cursor-pointer min-w-full" />
       </div>
 
-      {/* Transport Controls Bar (Sleek Single Line) */}
+      {/* Subtitle Edit 10x Studio Action Bar for Active Segment */}
+      {activeSegment && (
+        <div className="bg-slate-50 border border-indigo-100 rounded-lg px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+          {/* Active Segment Badge & Speaker Info */}
+          <div className="flex items-center gap-2 font-mono">
+            <span className="bg-indigo-600 text-white font-bold px-2 py-0.5 rounded text-[11px] shadow-2xs">
+              Segment #{activeSegment.segment_id}
+            </span>
+            <span className="font-bold text-slate-700">{activeSegment.speaker}</span>
+            <span className="text-[11px] text-slate-500 font-semibold">
+              ({formatTime(activeSegment.start_time)} - {formatTime(activeSegment.end_time)} | {activeSegment.duration.toFixed(3)}s)
+            </span>
+          </div>
+
+          {/* Quick Subtitle Edit Buttons */}
+          <div className="flex flex-wrap items-center gap-1">
+            {/* Set Start / End to Current Cursor */}
+            <button
+              onClick={handleSetStartToCursor}
+              title="Set Start to Current Playhead Cursor (Hotkey: [ )"
+              className="inline-flex items-center gap-1 px-2 py-1 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md text-[11px] font-bold shadow-2xs transition-all active:scale-95 cursor-pointer"
+            >
+              <ArrowLeftToLine className="w-3 h-3 text-indigo-600" />
+              <span>Set Start [</span>
+            </button>
+
+            <button
+              onClick={handleSetEndToCursor}
+              title="Set End to Current Playhead Cursor (Hotkey: ] )"
+              className="inline-flex items-center gap-1 px-2 py-1 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md text-[11px] font-bold shadow-2xs transition-all active:scale-95 cursor-pointer"
+            >
+              <ArrowRightToLine className="w-3 h-3 text-indigo-600" />
+              <span>Set End ]</span>
+            </button>
+
+            {/* Split at Cursor */}
+            <button
+              onClick={() => onSplitSegmentRef.current && onSplitSegmentRef.current(activeSegment.segment_id, currentTime)}
+              title="Split Dialogue at Current Playhead Cursor (Hotkey: S )"
+              className="inline-flex items-center gap-1 px-2 py-1 bg-white hover:bg-amber-50 text-amber-800 border border-amber-300 rounded-md text-[11px] font-bold shadow-2xs transition-all active:scale-95 cursor-pointer"
+            >
+              <Scissors className="w-3 h-3 text-amber-600" />
+              <span>Split (S)</span>
+            </button>
+
+            {/* Merge with Next */}
+            <button
+              onClick={() => onMergeSegmentRef.current && onMergeSegmentRef.current(activeSegment.segment_id)}
+              title="Merge with Next Dialogue (Hotkey: M )"
+              className="inline-flex items-center gap-1 px-2 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-md text-[11px] font-bold shadow-2xs transition-all active:scale-95 cursor-pointer"
+            >
+              <GitMerge className="w-3 h-3 text-slate-600" />
+              <span>Merge (M)</span>
+            </button>
+
+            {/* Micro Nudges */}
+            <div className="flex items-center bg-white border border-slate-200 rounded-md p-0.5 text-[10px] font-mono">
+              <button 
+                onClick={() => handleNudgeStart(-0.05)} 
+                title="Start -50ms" 
+                className="px-1 hover:bg-slate-100 rounded text-slate-600 cursor-pointer"
+              >
+                ◀-50ms
+              </button>
+              <span className="text-slate-300">|</span>
+              <button 
+                onClick={() => handleNudgeStart(0.05)} 
+                title="Start +50ms" 
+                className="px-1 hover:bg-slate-100 rounded text-slate-600 cursor-pointer"
+              >
+                +50ms▶
+              </button>
+            </div>
+
+            {/* Dialogue Jumpers */}
+            <div className="flex items-center gap-0.5 pl-1">
+              <button
+                onClick={handlePrevSegment}
+                title="Jump to Previous Dialogue (Hotkey: A)"
+                className="p-1 text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 rounded-md cursor-pointer"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={handleNextSegment}
+                title="Jump to Next Dialogue (Hotkey: D)"
+                className="p-1 text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 rounded-md cursor-pointer"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transport Controls Bar (Sleek Studio Single Line) */}
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-        {/* Left: Global Play (Entire Audio), Stop & Timecode */}
+        {/* Left: Global Play (Entire Audio), Loop Segment, Stop & Timecode */}
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => skip(-2)}
@@ -462,7 +691,7 @@ export default function AudioWaveform({
           </button>
 
           {/* Compact Timecode */}
-          <div className="font-mono text-[11px] text-slate-700 bg-slate-100 px-2 py-1 rounded-lg border border-slate-200 flex items-center gap-1 shadow-2xs">
+          <div className="font-mono text-[11px] text-slate-700 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200 flex items-center gap-1 shadow-2xs">
             <span className="text-indigo-600 font-bold">{formatTime(currentTime)}</span>
             <span className="text-slate-400">/</span>
             <span className="text-slate-600 font-semibold">{formatTime(duration)}</span>
@@ -521,7 +750,7 @@ export default function AudioWaveform({
               value={zoomLevel}
               onChange={(e) => setZoomLevel(Number(e.target.value))}
               className="w-16 accent-indigo-600 cursor-pointer h-1 bg-slate-200 rounded"
-              title={`Zoom: ${zoomLevel}px/s (Use mouse wheel to scroll horizontally)`}
+              title={`Zoom: ${zoomLevel}px/s (Scroll with mouse wheel)`}
             />
             <button 
               onClick={() => setZoomLevel(Math.min(150, zoomLevel + 10))}

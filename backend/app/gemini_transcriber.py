@@ -396,11 +396,14 @@ def process_audio_file(
         except Exception:
             pass
 
-        # Guarantee non-overlapping
+        # Guarantee non-overlapping with natural dialogue breathing room
         if s_time < prev_end:
-            s_time = prev_end
+            s_time = round(prev_end + 0.060, 3)
+        elif s_time == prev_end and i > 1:
+            s_time = round(prev_end + 0.060, 3)
+
         if e_time <= s_time:
-            e_time = s_time + 0.5
+            e_time = round(s_time + 0.5, 3)
 
         s_time = round(s_time, 3)
         e_time = round(e_time, 3)

@@ -446,6 +446,100 @@ export default function App() {
     });
   };
 
+  const handleSplitSegmentAtTime = (segId, splitTime) => {
+    const formatTimeStr = (secs) => {
+      const m = Math.floor(secs / 60);
+      const s = Math.floor(secs % 60);
+      const ms = Math.floor((secs % 1) * 1000);
+      return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+    };
+
+    setSegments((prev) => {
+      const targetSeg = prev.find((s) => s.segment_id === segId);
+      if (!targetSeg) return prev;
+
+      const split = Math.max(
+        targetSeg.start_time + 0.1,
+        Math.min(targetSeg.end_time - 0.1, splitTime || (targetSeg.start_time + targetSeg.end_time) / 2)
+      );
+      const words = (targetSeg.transcript || '').trim().split(/\s+/);
+      const half = Math.ceil(words.length / 2);
+      const text1 = words.slice(0, half).join(' ');
+      const text2 = words.slice(half).join(' ');
+
+      const newSegments = [];
+      prev.forEach((s) => {
+        if (s.segment_id === segId) {
+          newSegments.push({
+            ...s,
+            end_time: split,
+            duration: parseFloat((split - s.start_time).toFixed(3)),
+            start_time_str: formatTimeStr(s.start_time),
+            end_time_str: formatTimeStr(split),
+            transcript: text1,
+            words: []
+          });
+          newSegments.push({
+            ...s,
+            segment_id: s.segment_id + 0.5,
+            start_time: parseFloat((split + 0.05).toFixed(3)),
+            end_time: s.end_time,
+            duration: parseFloat((s.end_time - split - 0.05).toFixed(3)),
+            start_time_str: formatTimeStr(split + 0.05),
+            end_time_str: formatTimeStr(s.end_time),
+            transcript: text2,
+            words: []
+          });
+        } else {
+          newSegments.push(s);
+        }
+      });
+
+      const reindexed = newSegments.map((s, idx) => ({ ...s, segment_id: idx + 1 }));
+      if (transcriptionResult) {
+        setTranscriptionResult((prevRes) => ({ ...prevRes, segments: reindexed }));
+      }
+      handleLint(reindexed);
+      return reindexed;
+    });
+  };
+
+  const handleMergeSegmentWithNext = (segId) => {
+    const formatTimeStr = (secs) => {
+      const m = Math.floor(secs / 60);
+      const s = Math.floor(secs % 60);
+      const ms = Math.floor((secs % 1) * 1000);
+      return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+    };
+
+    setSegments((prev) => {
+      const index = prev.findIndex((s) => s.segment_id === segId);
+      if (index === -1 || index >= prev.length - 1) return prev;
+
+      const current = prev[index];
+      const next = prev[index + 1];
+
+      const merged = {
+        ...current,
+        end_time: next.end_time,
+        duration: parseFloat((next.end_time - current.start_time).toFixed(3)),
+        start_time_str: formatTimeStr(current.start_time),
+        end_time_str: formatTimeStr(next.end_time),
+        transcript: `${current.transcript || ''} ${next.transcript || ''}`.trim(),
+        words: [...(current.words || []), ...(next.words || [])]
+      };
+
+      const newSegments = [...prev];
+      newSegments.splice(index, 2, merged);
+      const reindexed = newSegments.map((s, idx) => ({ ...s, segment_id: idx + 1 }));
+      if (transcriptionResult) {
+        setTranscriptionResult((prevRes) => ({ ...prevRes, segments: reindexed }));
+      }
+      handleLint(reindexed);
+      return reindexed;
+    });
+  };
+
   return (
     <div className="min-h-screen bg-slate-100/60 text-slate-900 flex flex-col font-sans">
       {/* Top Navbar (Ultra Compact) */}
@@ -662,8 +756,11 @@ export default function App() {
               audioUrl={audioUrl}
               segments={segments}
               currentSegmentId={activeSegmentId}
+              setActiveSegmentId={setActiveSegmentId}
               onSegmentClick={(seg) => setActiveSegmentId(seg.segment_id)}
               onSegmentTimeChange={handleSegmentTimeChange}
+              onSplitSegment={handleSplitSegmentAtTime}
+              onMergeSegment={handleMergeSegmentWithNext}
               playTargetTime={playTargetTime}
             />
           ) : (
