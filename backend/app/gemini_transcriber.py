@@ -85,8 +85,8 @@ def transcribe_audio_with_gemini(
     client = get_gemini_client(api_key)
     
     # Active candidate models for resilient fallback during high-demand spikes
-    candidate_models = ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-pro-latest"]
-    if model_name and model_name not in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.6-flash"]:
+    candidate_models = ["gemini-flash-latest", "gemini-flash-lite-latest"]
+    if model_name and model_name not in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.6-flash", "gemini-pro-latest"]:
         if model_name in candidate_models:
             candidate_models.remove(model_name)
         candidate_models.insert(0, model_name)
