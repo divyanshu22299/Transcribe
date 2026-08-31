@@ -84,15 +84,10 @@ def transcribe_audio_with_gemini(
     import time
     client = get_gemini_client(api_key)
     
-    # Candidate models in order of priority (active 2026 production endpoints)
-    candidate_models = []
-    if model_name and model_name not in ["gemini-2.0-flash", "gemini-1.5-flash"]:
-        candidate_models.append(model_name)
-    if GEMINI_MODEL and GEMINI_MODEL not in candidate_models and GEMINI_MODEL not in ["gemini-2.0-flash", "gemini-1.5-flash"]:
-        candidate_models.append(GEMINI_MODEL)
-    for fallback in ["gemini-flash-latest", "gemini-pro-latest", "gemini-2.5-flash", "gemini-2.5-pro"]:
-        if fallback not in candidate_models:
-            candidate_models.append(fallback)
+    # Candidate models strictly using verified working endpoints
+    candidate_models = ["gemini-flash-latest"]
+    if model_name and model_name not in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.6-flash"]:
+        candidate_models.insert(0, model_name)
 
     audio_file_path = Path(audio_path)
     
@@ -160,7 +155,7 @@ Return a valid JSON object matching this schema:
                             max_output_tokens=65536,
                         )
                     )
-                    if response and response.text:
+                    if response is not None:
                         break
                 except Exception as e:
                     last_error = e
@@ -174,7 +169,7 @@ Return a valid JSON object matching this schema:
                         continue
                     else:
                         break
-            if response and response.text:
+            if response is not None:
                 break
     finally:
         # Guaranteed cleanup of uploaded file from Gemini cloud storage
@@ -184,7 +179,7 @@ Return a valid JSON object matching this schema:
             except Exception:
                 pass
 
-    if not response or not response.text:
+    if response is None:
         raise RuntimeError(f"Gemini transcription failed across candidate models: {last_error}")
 
     resp_text = (response.text or "").strip()
