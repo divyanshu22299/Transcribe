@@ -274,7 +274,7 @@ async def transcribe_audio(
             language=language,
             script=script,
             api_key=api_key,
-            model_name="gemini-flash-latest"
+            model_name=model_name or GEMINI_MODEL
         )
     except Exception as trans_err:
         import traceback

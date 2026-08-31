@@ -84,12 +84,15 @@ def transcribe_audio_with_gemini(
     import time
     client = get_gemini_client(api_key)
     
-    # Active candidate models for resilient fallback during high-demand spikes
-    candidate_models = ["gemini-flash-latest", "gemini-flash-lite-latest"]
-    if model_name and model_name not in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.6-flash", "gemini-pro-latest"]:
-        if model_name in candidate_models:
-            candidate_models.remove(model_name)
-        candidate_models.insert(0, model_name)
+    # Active high-quality candidate models in order of transcription fidelity & precision
+    candidate_models = []
+    if model_name and model_name not in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-pro-latest"]:
+        candidate_models.append(model_name)
+    if GEMINI_MODEL and GEMINI_MODEL not in candidate_models and GEMINI_MODEL not in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-pro-latest"]:
+        candidate_models.append(GEMINI_MODEL)
+    for high_quality_model in ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest"]:
+        if high_quality_model not in candidate_models:
+            candidate_models.append(high_quality_model)
 
     audio_file_path = Path(audio_path)
     
