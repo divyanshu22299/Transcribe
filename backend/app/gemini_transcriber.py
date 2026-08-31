@@ -84,10 +84,8 @@ def transcribe_audio_with_gemini(
     import time
     client = get_gemini_client(api_key)
     
-    # Candidate models strictly using verified working endpoints
-    candidate_models = ["gemini-flash-latest"]
-    if model_name and model_name not in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.6-flash"]:
-        candidate_models.insert(0, model_name)
+    # Target model: Strictly use active working 2026 production endpoint
+    target_model = "gemini-flash-latest"
 
     audio_file_path = Path(audio_path)
     
@@ -142,35 +140,32 @@ Return a valid JSON object matching this schema:
     last_error = None
 
     try:
-        for candidate in candidate_models:
-            for attempt in range(1, 4):
-                try:
-                    response = client.models.generate_content(
-                        model=candidate,
-                        contents=[uploaded_file, user_prompt],
-                        config=types.GenerateContentConfig(
-                            system_instruction=SYSTEM_INSTRUCTION,
-                            response_mime_type="application/json",
-                            temperature=0.1,
-                            max_output_tokens=65536,
-                        )
+        for attempt in range(1, 4):
+            try:
+                response = client.models.generate_content(
+                    model=target_model,
+                    contents=[uploaded_file, user_prompt],
+                    config=types.GenerateContentConfig(
+                        system_instruction=SYSTEM_INSTRUCTION,
+                        response_mime_type="application/json",
+                        temperature=0.1,
+                        max_output_tokens=65536,
                     )
-                    if response is not None:
-                        break
-                except Exception as e:
-                    last_error = e
-                    err_str = str(e).lower()
-                    retryable_keywords = [
-                        "503", "unavailable", "429", "quota", "resource_exhausted",
-                        "timeout", "deadline", "timed out", "connection", "reset", "500", "internal"
-                    ]
-                    if any(kw in err_str for kw in retryable_keywords) and attempt < 3:
-                        time.sleep(attempt * 2.0)
-                        continue
-                    else:
-                        break
-            if response is not None:
-                break
+                )
+                if response is not None:
+                    break
+            except Exception as e:
+                last_error = e
+                err_str = str(e).lower()
+                retryable_keywords = [
+                    "503", "unavailable", "429", "quota", "resource_exhausted",
+                    "timeout", "deadline", "timed out", "connection", "reset", "500", "internal"
+                ]
+                if any(kw in err_str for kw in retryable_keywords) and attempt < 3:
+                    time.sleep(attempt * 2.0)
+                    continue
+                else:
+                    break
     finally:
         # Guaranteed cleanup of uploaded file from Gemini cloud storage
         if uploaded_file:
