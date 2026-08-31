@@ -84,13 +84,13 @@ def transcribe_audio_with_gemini(
     import time
     client = get_gemini_client(api_key)
     
-    # Candidate models in order of priority
+    # Candidate models in order of priority (active 2026 production endpoints)
     candidate_models = []
-    if model_name:
+    if model_name and model_name not in ["gemini-2.0-flash", "gemini-1.5-flash"]:
         candidate_models.append(model_name)
-    if GEMINI_MODEL and GEMINI_MODEL not in candidate_models:
+    if GEMINI_MODEL and GEMINI_MODEL not in candidate_models and GEMINI_MODEL not in ["gemini-2.0-flash", "gemini-1.5-flash"]:
         candidate_models.append(GEMINI_MODEL)
-    for fallback in ["gemini-2.0-flash", "gemini-1.5-flash"]:
+    for fallback in ["gemini-flash-latest", "gemini-pro-latest", "gemini-2.5-flash", "gemini-2.5-pro"]:
         if fallback not in candidate_models:
             candidate_models.append(fallback)
 

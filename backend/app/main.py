@@ -268,13 +268,21 @@ async def transcribe_audio(
     else:
         raise HTTPException(status_code=400, detail="Audio file or valid audio_id is required.")
 
-    result = process_audio_file(
-        audio_path=target_path,
-        language=language,
-        script=script,
-        api_key=api_key,
-        model_name=model_name
-    )
+    try:
+        result = process_audio_file(
+            audio_path=target_path,
+            language=language,
+            script=script,
+            api_key=api_key,
+            model_name=model_name
+        )
+    except Exception as trans_err:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Transcription failed: {str(trans_err)}"
+        )
 
     active_sessions[result.audio_id] = {
         "filename": result.filename,
