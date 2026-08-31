@@ -1,8 +1,10 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from pydantic import BaseModel, Field
 
 class QCError(BaseModel):
-    segment_id: int
+    # BUG-W5: segment_id uses Union[int, float] because during split operations
+    # temporary float IDs like 1.5, 2.5 are assigned before re-indexing.
+    segment_id: Union[int, float]
     field: str
     error_type: str
     message: str
@@ -74,7 +76,13 @@ class UpdateSegmentRequest(BaseModel):
     end_time: Optional[float] = None
     transcript: Optional[str] = None
 
+class LintRequest(BaseModel):
+    segments: List[Segment]
+    language: str = "Hindi"
+    script: str = "Devanagari"
+
 class AutoFixRequest(BaseModel):
+    segments: Optional[List[Segment]] = None
     fix_digits: bool = True
     fix_punctuation: bool = True
     fix_overlaps: bool = True
@@ -84,5 +92,5 @@ class AutoFixRequest(BaseModel):
     script: str = "Devanagari"
 
 class ExportRequest(BaseModel):
-    format: str  # csv, tsv, txt, docx, xlsx, json, srt, rejection_csv
+    format: str  # csv, tsv, txt, docx, xlsx, json, srt, vtt, rejection_csv
     custom_columns: Optional[Dict[str, str]] = None

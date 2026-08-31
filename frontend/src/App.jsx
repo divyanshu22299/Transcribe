@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Upload, FileAudio, Play, Download, AlertCircle,
-  CheckCircle2, RefreshCw, Sparkles, BookOpen, Volume2, Package, Check, Layers, Loader2, Database, Save, Timer
+  Upload, FileAudio, CheckCircle2, RefreshCw, Sparkles, Package, Loader2, Save, Timer
 } from 'lucide-react';
 
 import Navbar from './components/Navbar';
@@ -10,12 +9,29 @@ import SegmentEditor from './components/SegmentEditor';
 import ExportModal from './components/ExportModal';
 import GuidelinesModal from './components/GuidelinesModal';
 import ProjectsModal from './components/ProjectsModal';
+import SrtPreviewModal from './components/SrtPreviewModal';
+import StatsModal from './components/StatsModal';
+import SpeakerCustomizerModal from './components/SpeakerCustomizerModal';
+import DiffModal from './components/DiffModal';
+import ProjectNotesModal from './components/ProjectNotesModal';
+import { parseSubtitles } from './utils/subtitleParser';
 import { API_BASE } from './config';
 
 export default function App() {
   const [showGuidelines, setShowGuidelines] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [showSrtPreview, setShowSrtPreview] = useState(false);
+  const [showStatsModal, setShowStatsModal] = useState(false);
+  const [showSpeakerModal, setShowSpeakerModal] = useState(false);
+  const [showDiffModal, setShowDiffModal] = useState(false);
+  const [showNotesModal, setShowNotesModal] = useState(false);
+  const [originalSegments, setOriginalSegments] = useState([]);
+  const [autoSaveStatus, setAutoSaveStatus] = useState('');
   const [hasApiKey, setHasApiKey] = useState(false);
+
+  // Undo / Redo History Stack
+  const [history, setHistory] = useState([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
 
   // Neon DB Project History State
   const [showProjectsModal, setShowProjectsModal] = useState(false);
@@ -67,6 +83,29 @@ export default function App() {
       console.error("Backend connection error:", err);
     }
   };
+
+  // FEAT-06: 30-second debounced auto-save to localStorage
+  useEffect(() => {
+    if (!segments || segments.length === 0) return;
+    const fileId = selectedFile?.name || transcriptionResult?.filename || 'draft_audio';
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem(`karya_autosave_${fileId}`, JSON.stringify({
+          segments,
+          complianceScore,
+          totalErrors,
+          totalWarnings,
+          timestamp: new Date().toISOString()
+        }));
+        setAutoSaveStatus('Draft auto-saved ✓');
+        setTimeout(() => setAutoSaveStatus(''), 2500);
+      } catch (e) {
+        console.warn('Auto-save storage quota exceeded', e);
+      }
+    }, 30000);
+
+    return () => clearTimeout(timer);
+  }, [segments, complianceScore, totalErrors, totalWarnings, selectedFile, transcriptionResult]);
 
   const handleFileSelect = (e) => {
     const file = e.target.files[0];
@@ -177,12 +216,16 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setTranscriptionResult(data);
-        setSegments(data.segments || []);
+        const segs = data.segments || [];
+        setSegments(segs);
+        setOriginalSegments(JSON.parse(JSON.stringify(segs)));
+        setHistory([segs]);
+        setHistoryIndex(0);
         setComplianceScore(data.compliance_score || 100.0);
         setTotalErrors(data.total_errors || 0);
         setTotalWarnings(data.total_warnings || 0);
-        if (data.segments && data.segments.length > 0) {
-          setActiveSegmentId(data.segments[0].segment_id);
+        if (segs.length > 0) {
+          setActiveSegmentId(segs[0].segment_id);
         }
         stopProgressSimulation(true);
       } else {
@@ -372,20 +415,108 @@ export default function App() {
     }
   };
 
+  const pushToHistory = (newSegments) => {
+    setHistory((prev) => {
+      const next = prev.slice(0, historyIndex + 1);
+      return [...next, newSegments];
+    });
+    setHistoryIndex((prev) => prev + 1);
+  };
+
+  const handleUndo = () => {
+    if (historyIndex > 0) {
+      const targetIdx = historyIndex - 1;
+      const targetSegs = history[targetIdx];
+      setHistoryIndex(targetIdx);
+      setSegments(targetSegs);
+      handleLint(targetSegs);
+      setDbSaveToast('Undo applied (Ctrl+Z)');
+      setTimeout(() => setDbSaveToast(''), 1500);
+    }
+  };
+
+  const handleRedo = () => {
+    if (historyIndex < history.length - 1) {
+      const targetIdx = historyIndex + 1;
+      const targetSegs = history[targetIdx];
+      setHistoryIndex(targetIdx);
+      setSegments(targetSegs);
+      handleLint(targetSegs);
+      setDbSaveToast('Redo applied (Ctrl+Y)');
+      setTimeout(() => setDbSaveToast(''), 1500);
+    }
+  };
+
+  const handleImportSubtitles = (file) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result;
+        const parsed = parseSubtitles(text);
+        if (parsed && parsed.length > 0) {
+          setSegments(parsed);
+          setOriginalSegments(JSON.parse(JSON.stringify(parsed)));
+          setHistory([parsed]);
+          setHistoryIndex(0);
+          handleLint(parsed);
+          setDbSaveToast(`Imported ${parsed.length} subtitles from ${file.name} ✓`);
+          setTimeout(() => setDbSaveToast(''), 3000);
+        } else {
+          alert('Could not parse subtitles from this file.');
+        }
+      } catch (err) {
+        alert('Failed to parse subtitle file: ' + err);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      const tag = e.target?.tagName?.toLowerCase();
+      const isInput = tag === 'input' || tag === 'textarea' || tag === 'select';
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        if (!isInput) {
+          e.preventDefault();
+          handleUndo();
+        }
+      } else if (
+        ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') ||
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'z')
+      ) {
+        if (!isInput) {
+          e.preventDefault();
+          handleRedo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleSaveToNeonDb();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [history, historyIndex, segments, transcriptionResult]);
+
   const handleLoadProject = async (projectId) => {
     try {
       const res = await fetch(`${API_BASE}/api/projects/${projectId}`);
       if (res.ok) {
         const data = await res.json();
         setTranscriptionResult(data);
-        setSegments(data.segments || []);
+        const segs = data.segments || [];
+        setSegments(segs);
+        setOriginalSegments(JSON.parse(JSON.stringify(segs)));
+        setHistory([segs]);
+        setHistoryIndex(0);
         setTargetLanguage(data.language || 'Auto-Detect');
         setTargetScript(data.script || 'Auto-Detect');
         setComplianceScore(data.compliance_score || 100.0);
         setTotalErrors(data.total_errors || 0);
         setTotalWarnings(data.total_warnings || 0);
-        if (data.segments && data.segments.length > 0) {
-          setActiveSegmentId(data.segments[0].segment_id);
+        if (segs.length > 0) {
+          setActiveSegmentId(segs[0].segment_id);
         }
         if (data.filename) {
           setAudioUrl(`${API_BASE}/api/audio/${data.filename}`);
@@ -540,6 +671,42 @@ export default function App() {
     });
   };
 
+  const handleAddSegmentAtTime = (startTime) => {
+    const formatTimeStr = (secs) => {
+      const m = Math.floor(secs / 60);
+      const s = Math.floor(secs % 60);
+      const ms = Math.floor((secs % 1) * 1000);
+      return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+    };
+
+    const sTime = parseFloat(startTime.toFixed(3));
+    const eTime = parseFloat((sTime + 2.0).toFixed(3));
+
+    const newSeg = {
+      segment_id: segments.length + 1,
+      speaker: 'Speaker 1',
+      gender: 'Male',
+      start_time: sTime,
+      end_time: eTime,
+      start_time_str: formatTimeStr(sTime),
+      end_time_str: formatTimeStr(eTime),
+      duration: 2.0,
+      transcript: '',
+      confidence: 1.0,
+      words: [],
+      qc_errors: [],
+      is_valid: true
+    };
+
+    const updated = [...segments, newSeg].sort((a, b) => a.start_time - b.start_time).map((s, idx) => ({ ...s, segment_id: idx + 1 }));
+    setSegments(updated);
+    pushToHistory(updated);
+    setActiveSegmentId(newSeg.segment_id);
+    handleLint(updated);
+    setDbSaveToast(`Added new segment at ${sTime.toFixed(2)}s ✓`);
+    setTimeout(() => setDbSaveToast(''), 2000);
+  };
+
   return (
     <div className="min-h-screen bg-slate-100/60 text-slate-900 flex flex-col font-sans">
       {/* Top Navbar (Ultra Compact) */}
@@ -547,6 +714,15 @@ export default function App() {
         hasApiKey={hasApiKey}
         setShowGuidelines={setShowGuidelines}
         onOpenProjects={handleOpenProjects}
+        onOpenStats={() => setShowStatsModal(true)}
+        onOpenSpeakers={() => setShowSpeakerModal(true)}
+        onOpenDiff={() => setShowDiffModal(true)}
+        onOpenNotes={() => setShowNotesModal(true)}
+        onImportSubtitles={handleImportSubtitles}
+        canUndo={historyIndex > 0}
+        canRedo={historyIndex < history.length - 1}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
         currentFilename={selectedFile ? selectedFile.name : null}
         segmentCount={segments.length}
         complianceScore={segments.length > 0 ? complianceScore : null}
@@ -761,6 +937,7 @@ export default function App() {
               onSegmentTimeChange={handleSegmentTimeChange}
               onSplitSegment={handleSplitSegmentAtTime}
               onMergeSegment={handleMergeSegmentWithNext}
+              onAddSegmentAtTime={handleAddSegmentAtTime}
               playTargetTime={playTargetTime}
             />
           ) : (
@@ -788,11 +965,39 @@ export default function App() {
             onLintTrigger={handleLint}
             onStartTranscribe={handleStartTranscribe}
             audioLoaded={!!selectedFile}
+            onOpenSrtPreview={() => setShowSrtPreview(true)}
           />
         </div>
       </main>
 
       {/* Modals */}
+      <SrtPreviewModal
+        isOpen={showSrtPreview}
+        onClose={() => setShowSrtPreview(false)}
+        segments={segments}
+        filename={selectedFile ? selectedFile.name : 'audio_transcript'}
+      />
+
+      <StatsModal
+        isOpen={showStatsModal}
+        onClose={() => setShowStatsModal(false)}
+        segments={segments}
+        audioInfo={transcriptionResult?.audio_info}
+        filename={selectedFile ? selectedFile.name : 'audio_transcript'}
+        complianceScore={complianceScore}
+      />
+
+      <SpeakerCustomizerModal
+        isOpen={showSpeakerModal}
+        onClose={() => setShowSpeakerModal(false)}
+        segments={segments}
+        onUpdateSegments={(updated) => {
+          setSegments(updated);
+          pushToHistory(updated);
+          handleLint(updated);
+        }}
+      />
+
       <ExportModal
         isOpen={showExportModal}
         onClose={() => setShowExportModal(false)}
@@ -813,6 +1018,19 @@ export default function App() {
         onClose={() => setShowGuidelines(false)}
       />
 
+      <DiffModal
+        isOpen={showDiffModal}
+        onClose={() => setShowDiffModal(false)}
+        originalSegments={originalSegments}
+        currentSegments={segments}
+      />
+
+      <ProjectNotesModal
+        isOpen={showNotesModal}
+        onClose={() => setShowNotesModal(false)}
+        filename={selectedFile ? selectedFile.name : (transcriptionResult?.filename || 'Current Project')}
+      />
+
       <ProjectsModal
         isOpen={showProjectsModal}
         onClose={() => setShowProjectsModal(false)}
@@ -824,10 +1042,10 @@ export default function App() {
       />
 
       {/* Floating Save / Action Toast */}
-      {dbSaveToast && (
+      {(dbSaveToast || autoSaveStatus) && (
         <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 bg-slate-900 text-white px-3.5 py-2 rounded-xl shadow-xl border border-slate-700 text-xs font-bold animate-in fade-in slide-in-from-bottom-2">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span>{dbSaveToast}</span>
+          <span>{dbSaveToast || autoSaveStatus}</span>
         </div>
       )}
     </div>

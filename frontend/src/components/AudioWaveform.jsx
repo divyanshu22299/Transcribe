@@ -5,7 +5,7 @@ import TimelinePlugin from 'wavesurfer.js/dist/plugins/timeline.esm.js';
 import HoverPlugin from 'wavesurfer.js/dist/plugins/hover.esm.js';
 import {
   Play, Pause, Square, RotateCcw, RotateCw, Volume2, VolumeX, ZoomIn, ZoomOut, Repeat,
-  Scissors, GitMerge, ChevronLeft, ChevronRight, CornerDownRight, ArrowLeftToLine, ArrowRightToLine
+  Scissors, GitMerge, ChevronLeft, ChevronRight, CornerDownRight, ArrowLeftToLine, ArrowRightToLine, Plus
 } from 'lucide-react';
 
 export default function AudioWaveform({
@@ -17,6 +17,7 @@ export default function AudioWaveform({
   onSegmentTimeChange,
   onSplitSegment,
   onMergeSegment,
+  onAddSegmentAtTime,
   onTimeUpdate,
   playTargetTime
 }) {
@@ -249,6 +250,10 @@ export default function AudioWaveform({
     wavesurferRef.current = ws;
 
     return () => {
+      // BUG-W7: Clear loop state on unmount/audio change to prevent stale loop refs
+      activeLoopRef.current = null;
+      setIsLoopingSegment(false);
+      setActiveLoopDisplay(null);
       try {
         ws.destroy();
       } catch (e) {}
@@ -268,17 +273,34 @@ export default function AudioWaveform({
       const existingMap = new Map();
       existingRegions.forEach((r) => existingMap.set(String(r.id), r));
 
+      const getSpeakerColor = (speakerName, isCurrent, hasErrors) => {
+        if (hasErrors) return 'rgba(239, 68, 68, 0.35)'; // Red for QC errors
+        if (isCurrent) return 'rgba(245, 158, 11, 0.45)'; // Amber for active
+        
+        const palette = [
+          'rgba(99, 102, 241, 0.25)',  // Indigo
+          'rgba(16, 185, 129, 0.25)',  // Emerald
+          'rgba(139, 92, 246, 0.25)',  // Violet
+          'rgba(6, 182, 212, 0.25)',   // Cyan
+          'rgba(236, 72, 153, 0.25)',  // Pink
+          'rgba(249, 115, 22, 0.25)'   // Orange
+        ];
+        
+        let hash = 0;
+        const str = speakerName || 'Speaker 1';
+        for (let i = 0; i < str.length; i++) {
+          hash = str.charCodeAt(i) + ((hash << 5) - hash);
+        }
+        const index = Math.abs(hash) % palette.length;
+        return palette[index];
+      };
+
       segments.forEach((seg) => {
         const segIdStr = String(seg.segment_id);
         const isCurrent = seg.segment_id === currentSegmentId;
-        const isSpeaker1 = seg.speaker === 'Speaker 1';
+        const hasErrors = seg.qc_errors && seg.qc_errors.some(e => e.severity === 'error');
 
-        let shadowColor = 'rgba(59, 130, 246, 0.22)'; // Blue shadow for Speaker 1
-        if (isCurrent) {
-          shadowColor = 'rgba(245, 158, 11, 0.42)'; // Highlighted Amber shadow for active
-        } else if (!isSpeaker1) {
-          shadowColor = 'rgba(16, 185, 129, 0.22)'; // Emerald shadow for Speaker 2
-        }
+        const shadowColor = getSpeakerColor(seg.speaker, isCurrent, hasErrors);
 
         const snippet = (seg.transcript || '').trim();
         const shortSnippet = snippet.length > 28 ? snippet.slice(0, 28) + '...' : snippet;
@@ -601,6 +623,18 @@ export default function AudioWaveform({
               <GitMerge className="w-3 h-3 text-slate-600" />
               <span>Merge (M)</span>
             </button>
+
+            {/* Add New Segment at Current Playhead (FEAT-11) */}
+            {onAddSegmentAtTime && (
+              <button
+                onClick={() => onAddSegmentAtTime(currentTime)}
+                title="Add New Blank Segment at Playhead"
+                className="inline-flex items-center gap-1 px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-md text-[11px] font-bold shadow-2xs transition-all active:scale-95 cursor-pointer"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Add at Cursor</span>
+              </button>
+            )}
 
             {/* Micro Nudges */}
             <div className="flex items-center bg-white border border-slate-200 rounded-md p-0.5 text-[10px] font-mono">

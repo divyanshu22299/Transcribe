@@ -156,9 +156,18 @@ def test_export_all_formats():
     txt_out = export_to_txt(res)
     assert "KARYA TRANSCRIPTION DELIVERABLE" in txt_out
 
-    # 4. SRT
+    # 4. SRT (Clean speaker prefix)
     srt_out = export_to_srt(res)
     assert "00:00:00,500 --> 00:00:03,500" in srt_out
+    assert "[Speaker 1] वह काम बहुत जल्द कर दिया।" in srt_out
+    assert "(Male):" not in srt_out  # BUG-07: Ensure speaker gender isn't mangling subtitle body
+
+    # 4b. WebVTT (SRT-07)
+    from app.export_service import export_to_vtt
+    vtt_out = export_to_vtt(res)
+    assert vtt_out.startswith("WEBVTT")
+    assert "00:00:00.500 --> 00:00:03.500" in vtt_out
+    assert "[Speaker 1] वह काम बहुत जल्द कर दिया।" in vtt_out
 
     # 5. JSON
     json_out = export_to_json(res)
@@ -190,6 +199,49 @@ def test_export_all_formats():
     }])
     assert "bad_audio.wav" in rej_out
     assert "Corrupted audio file" in rej_out
+
+
+def test_split_segment_qc_error_type():
+    from app.models import QCError
+    # Test float segment_id (BUG-W5)
+    qc = QCError(
+        segment_id=1.1,
+        field="transcript",
+        error_type="DIGITS_DETECTED",
+        message="Test digit error",
+        snippet="123",
+        severity="error"
+    )
+    assert qc.segment_id == 1.1
+
+
+def test_rate_limiting_and_session_eviction():
+    from app.main import _check_rate_limit, _evict_expired_sessions, active_sessions, _client_request_history
+    import time
+    from fastapi import HTTPException
+
+    # Rate limiting test
+    test_ip = "192.168.1.100"
+    _client_request_history[test_ip] = []
+    
+    # 29 allowed calls
+    for _ in range(29):
+        _check_rate_limit(test_ip)
+    
+    # 30th call allowed
+    _check_rate_limit(test_ip)
+    
+    # 31st call triggers 429
+    with pytest.raises(HTTPException) as exc_info:
+        _check_rate_limit(test_ip)
+    assert exc_info.value.status_code == 429
+
+    # Session TTL eviction test
+    active_sessions["old_session"] = {"created_at": time.time() - 8000}
+    active_sessions["new_session"] = {"created_at": time.time()}
+    _evict_expired_sessions()
+    assert "old_session" not in active_sessions
+    assert "new_session" in active_sessions
 
 
 def test_audio_rejection_evaluator():
@@ -255,3 +307,51 @@ def test_dialogue_aware_subtask_chunking():
     finally:
         if Path(temp_wav).exists():
             Path(temp_wav).unlink()
+
+
+def test_dual_channel_detection_and_physical_vad():
+    from app.audio_processor import detect_dual_channel_layout, extract_physical_speech_intervals
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+        stereo_wav = f.name
+
+    try:
+        sr = 16000
+        total_len = sr * 10  # 10 seconds
+        left = np.zeros(total_len, dtype=np.float32)
+        right = np.zeros(total_len, dtype=np.float32)
+
+        # Speaker 1 on Left Channel from 1.0s to 4.0s
+        t_left = np.linspace(0, 3, sr * 3, endpoint=False)
+        left[sr * 1:sr * 4] = 0.35 * np.sin(2 * np.pi * 300 * t_left)
+
+        # Speaker 2 on Right Channel from 4.5s to 8.0s
+        t_right = np.linspace(0, 3.5, int(sr * 3.5), endpoint=False)
+        right[int(sr * 4.5):int(sr * 8.0)] = 0.35 * np.sin(2 * np.pi * 600 * t_right)
+
+        stereo_data = np.column_stack([left, right])
+        sf.write(stereo_wav, stereo_data, sr)
+
+        # 1. Test dual channel detection
+        layout = detect_dual_channel_layout(stereo_wav)
+        assert layout["is_dual_channel"] is True
+        assert layout["channels"] == 2
+        assert layout["correlation"] < 0.2
+
+        # 2. Test physical interval extraction
+        intervals = extract_physical_speech_intervals(stereo_wav)
+        assert len(intervals) >= 2
+        # First interval must be Speaker 1 on Left Channel around 1.0s - 4.0s
+        assert intervals[0]["speaker"] == "Speaker 1"
+        assert intervals[0]["channel"] == 0
+        assert 0.90 <= intervals[0]["start_time"] <= 1.10
+        assert 3.90 <= intervals[0]["end_time"] <= 4.10
+
+        # Second interval must be Speaker 2 on Right Channel around 4.5s - 8.0s
+        assert intervals[1]["speaker"] == "Speaker 2"
+        assert intervals[1]["channel"] == 1
+        assert 4.40 <= intervals[1]["start_time"] <= 4.60
+        assert 7.90 <= intervals[1]["end_time"] <= 8.10
+    finally:
+        if Path(stereo_wav).exists():
+            Path(stereo_wav).unlink()

@@ -93,12 +93,20 @@ export default function ProjectsModal({
               <p className="text-xs font-semibold">Loading projects from Neon DB...</p>
             </div>
           ) : filtered.length === 0 ? (
-            <div className="text-center py-16 text-slate-400">
-              <Database className="w-8 h-8 mx-auto mb-2 text-slate-300" />
-              <p className="text-sm font-semibold text-slate-600">No saved projects found</p>
-              <p className="text-xs text-slate-400 mt-1">
-                Upload and transcribe an audio file to automatically save it in your database.
+            <div className="text-center py-14 px-6 bg-slate-50/70 border border-dashed border-slate-200 rounded-2xl">
+              <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-3">
+                <Database className="w-6 h-6" />
+              </div>
+              <p className="text-sm font-bold text-slate-800">No saved projects in Neon DB</p>
+              <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto leading-relaxed">
+                Transcribe any audio file or click "Save to Neon DB" to store full transcripts, timestamps, and confidence matrices in your PostgreSQL cloud.
               </p>
+              <button
+                onClick={onClose}
+                className="mt-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+              >
+                Upload New Audio
+              </button>
             </div>
           ) : (
             filtered.map((proj) => (

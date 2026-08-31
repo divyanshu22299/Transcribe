@@ -90,9 +90,34 @@ def export_to_srt(result: TranscriptionResult) -> str:
     for i, seg in enumerate(result.segments, 1):
         s_str = srt_time(seg.start_time)
         e_str = srt_time(seg.end_time)
-        entries.append(f"{i}\n{s_str} --> {e_str}\n{seg.speaker} ({seg.gender}): {seg.transcript}\n")
+        # SRT standard: subtitle body should be just the transcript text.
+        # Speaker label is placed as a clean prefix (compatible with most SRT players).
+        speaker_prefix = f"[{seg.speaker}] " if seg.speaker else ""
+        entries.append(f"{i}\n{s_str} --> {e_str}\n{speaker_prefix}{seg.transcript}\n")
 
     return "\n".join(entries)
+
+
+def export_to_vtt(result: TranscriptionResult) -> str:
+    """Generate standard WebVTT subtitle file (.vtt)."""
+    def vtt_time(seconds: float) -> str:
+        hrs = int(seconds // 3600)
+        mins = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        millis = int(round((seconds - int(seconds)) * 1000))
+        return f"{hrs:02d}:{mins:02d}:{secs:02d}.{millis:03d}"
+
+    lines = ["WEBVTT", ""]
+    for i, seg in enumerate(result.segments, 1):
+        s_str = vtt_time(seg.start_time)
+        e_str = vtt_time(seg.end_time)
+        speaker_prefix = f"[{seg.speaker}] " if seg.speaker else ""
+        lines.append(f"{i}")
+        lines.append(f"{s_str} --> {e_str}")
+        lines.append(f"{speaker_prefix}{seg.transcript}")
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 def export_to_json(result: TranscriptionResult) -> str:

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  X, Download, FileSpreadsheet, FileText, Code2, Film, Check, CheckSquare, Square, Package
+  X, Download, FileSpreadsheet, FileText, Code2, Film, CheckSquare, Square, Package
 } from 'lucide-react';
 
 export default function ExportModal({
@@ -10,6 +10,8 @@ export default function ExportModal({
 }) {
   const [isExporting, setIsExporting] = useState(false);
   const [selectedFormats, setSelectedFormats] = useState(['csv', 'docx', 'xlsx', 'srt']);
+  const [filenameTemplate, setFilenameTemplate] = useState('default');
+  const [customFilename, setCustomFilename] = useState('');
 
   if (!isOpen || !transcriptionResult) return null;
 
@@ -47,6 +49,14 @@ export default function ExportModal({
       badge: 'SRT'
     },
     {
+      id: 'vtt',
+      title: 'WebVTT Subtitles',
+      ext: '.vtt',
+      desc: 'Browser-native subtitle format for HTML5 video, YouTube, and modern media players.',
+      icon: Film,
+      badge: 'VTT'
+    },
+    {
       id: 'txt',
       title: 'Plain Text (TXT)',
       ext: '.txt',
@@ -82,6 +92,17 @@ export default function ExportModal({
     }
   };
 
+  const getEffectiveBaseName = () => {
+    const rawName = (transcriptionResult?.filename || 'audio').replace(/\.[^/.]+$/, "");
+    const lang = transcriptionResult?.language || 'Hindi';
+    const dateStr = new Date().toISOString().slice(0, 10);
+
+    if (filenameTemplate === 'lang_date') return `${rawName}_${lang}_${dateStr}`;
+    if (filenameTemplate === 'clean') return `${rawName}_transcript`;
+    if (filenameTemplate === 'custom' && customFilename.trim()) return customFilename.trim();
+    return `${rawName}_karya`;
+  };
+
   const handleDownloadSelected = async () => {
     if (selectedFormats.length === 0) return;
     setIsExporting(true);
@@ -98,11 +119,11 @@ export default function ExportModal({
 
       if (res.ok) {
         const blob = await res.blob();
-        const baseName = transcriptionResult.filename.replace(/\.[^/.]+$/, "");
-        const disposition = res.headers.get('Content-Disposition') || '';
-        let filename = `${baseName}_deliverables.zip`;
-        const match = disposition.match(/filename="?([^"]+)"?/);
-        if (match && match[1]) filename = match[1];
+        const effectiveBase = getEffectiveBaseName();
+        let filename = `${effectiveBase}_deliverables.zip`;
+        if (selectedFormats.length === 1) {
+          filename = `${effectiveBase}.${selectedFormats[0]}`;
+        }
 
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -137,10 +158,8 @@ export default function ExportModal({
 
       if (res.ok) {
         const blob = await res.blob();
-        const disposition = res.headers.get('Content-Disposition') || '';
-        let filename = `${transcriptionResult.filename}_karya.${formatId}`;
-        const match = disposition.match(/filename="?([^"]+)"?/);
-        if (match && match[1]) filename = match[1];
+        const effectiveBase = getEffectiveBaseName();
+        const filename = `${effectiveBase}.${formatId}`;
 
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -170,7 +189,7 @@ export default function ExportModal({
         </button>
 
         {/* Header */}
-        <div className="mb-5">
+        <div className="mb-4">
           <h2 className="text-lg font-bold text-slate-900 tracking-tight flex items-center gap-2">
             <Package className="w-5 h-5 text-indigo-600" />
             Multi-Select Deliverables Export
@@ -178,6 +197,58 @@ export default function ExportModal({
           <p className="text-xs text-slate-500 mt-0.5">
             Select one or more deliverable formats to download for <span className="text-indigo-700 font-semibold">{transcriptionResult.filename}</span>
           </p>
+        </div>
+
+        {/* FEAT-12: Custom Filename Template Selector */}
+        <div className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-2xl mb-4 space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="text-[11px] font-bold text-indigo-950 uppercase tracking-wider">
+              Filename Template
+            </label>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setFilenameTemplate('default')}
+                className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-colors cursor-pointer ${
+                  filenameTemplate === 'default' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 border border-slate-200'
+                }`}
+              >
+                Standard
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilenameTemplate('lang_date')}
+                className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-colors cursor-pointer ${
+                  filenameTemplate === 'lang_date' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 border border-slate-200'
+                }`}
+              >
+                +Lang+Date
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilenameTemplate('custom')}
+                className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-colors cursor-pointer ${
+                  filenameTemplate === 'custom' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 border border-slate-200'
+                }`}
+              >
+                Custom
+              </button>
+            </div>
+          </div>
+
+          {filenameTemplate === 'custom' ? (
+            <input
+              type="text"
+              placeholder="Enter custom export basename..."
+              value={customFilename}
+              onChange={(e) => setCustomFilename(e.target.value)}
+              className="w-full bg-white border border-indigo-200 rounded-xl px-3 py-1 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+            />
+          ) : (
+            <div className="text-[11px] font-mono text-indigo-700 bg-white/70 px-2.5 py-1 rounded-xl border border-indigo-100/80">
+              Preview: <span className="font-bold">{getEffectiveBaseName()}</span>.[ext]
+            </div>
+          )}
         </div>
 
         {/* Multi-Select Action Bar */}

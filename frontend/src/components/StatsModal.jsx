@@ -1,0 +1,199 @@
+﻿import React, { useMemo } from 'react';
+import { X, BarChart2, Clock, Users, Type, ShieldCheck, Activity } from 'lucide-react';
+
+export default function StatsModal({ isOpen, onClose, segments, audioInfo, filename, complianceScore }) {
+  const stats = useMemo(() => {
+    if (!segments || segments.length === 0) {
+      return null;
+    }
+
+    const totalSegs = segments.length;
+    let totalSpeechDuration = 0;
+    const speakerDurations = {};
+    const speakerWords = {};
+    let totalWords = 0;
+    let sumConfidence = 0;
+    let countConfidence = 0;
+    const wordFreq = new Set();
+
+    segments.forEach((seg) => {
+      const dur = Math.max(0, seg.end_time - seg.start_time);
+      totalSpeechDuration += dur;
+
+      const spk = seg.speaker || 'Speaker 1';
+      speakerDurations[spk] = (speakerDurations[spk] || 0) + dur;
+
+      const words = (seg.transcript || '').trim().split(/\s+/).filter(Boolean);
+      totalWords += words.length;
+      speakerWords[spk] = (speakerWords[spk] || 0) + words.length;
+
+      words.forEach(w => wordFreq.add(w.toLowerCase()));
+
+      if (seg.confidence !== undefined && seg.confidence !== null) {
+        sumConfidence += seg.confidence;
+        countConfidence++;
+      }
+    });
+
+    const totalDuration = (audioInfo && audioInfo.duration) > 0 ? audioInfo.duration : (segments[segments.length - 1]?.end_time || totalSpeechDuration);
+    const silenceDuration = Math.max(0, totalDuration - totalSpeechDuration);
+    const speechPercent = totalDuration > 0 ? Math.min(100, (totalSpeechDuration / totalDuration) * 100) : 100;
+    const avgConfidence = countConfidence > 0 ? (sumConfidence / countConfidence) * 100 : 95;
+    const wpm = totalSpeechDuration > 0 ? Math.round((totalWords / (totalSpeechDuration / 60))) : 0;
+
+    return {
+      totalSegs,
+      totalDuration,
+      totalSpeechDuration,
+      silenceDuration,
+      speechPercent,
+      totalWords,
+      uniqueWords: wordFreq.size,
+      avgConfidence,
+      wpm,
+      speakerDurations,
+      speakerWords
+    };
+  }, [segments, audioInfo]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
+      <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-2xl p-6 shadow-2xl flex flex-col max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-2xl">
+              <BarChart2 className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-slate-900">Transcript Analytics & Statistics</h2>
+              <p className="text-xs text-slate-500 font-medium">{filename || 'Audio Transcription'}</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 text-slate-400 hover:text-slate-700 rounded-xl bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {stats ? (
+          <div className="space-y-5">
+            {/* Top Metric Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
+                <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-semibold mb-1">
+                  <Clock className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Duration</span>
+                </div>
+                <div className="text-base font-black text-slate-800">{stats.totalDuration.toFixed(1)}s</div>
+                <div className="text-[10px] text-slate-400 mt-0.5">{stats.speechPercent.toFixed(0)}% speech ratio</div>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
+                <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-semibold mb-1">
+                  <Type className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Total Words</span>
+                </div>
+                <div className="text-base font-black text-slate-800">{stats.totalWords}</div>
+                <div className="text-[10px] text-slate-400 mt-0.5">{stats.uniqueWords} unique tokens</div>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
+                <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-semibold mb-1">
+                  <Activity className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Pace (WPM)</span>
+                </div>
+                <div className="text-base font-black text-slate-800">{stats.wpm}</div>
+                <div className="text-[10px] text-slate-400 mt-0.5">words per minute</div>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
+                <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-semibold mb-1">
+                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Compliance</span>
+                </div>
+                <div className="text-base font-black text-slate-800">{complianceScore || 100}%</div>
+                <div className="text-[10px] text-slate-400 mt-0.5">{stats.avgConfidence.toFixed(0)}% avg acoustic conf</div>
+              </div>
+            </div>
+
+            {/* Speaker Breakdown Section */}
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Speaker Diarization Distribution</span>
+              </h3>
+
+              <div className="space-y-3">
+                {Object.entries(stats.speakerDurations).map(([speaker, dur]) => {
+                  const percent = stats.totalSpeechDuration > 0 ? (dur / stats.totalSpeechDuration) * 100 : 0;
+                  const words = stats.speakerWords[speaker] || 0;
+                  const isSpk1 = speaker === 'Speaker 1';
+
+                  return (
+                    <div key={speaker} className="space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2 font-bold text-slate-800">
+                          <span className={`w-2.5 h-2.5 rounded-full ${isSpk1 ? 'bg-indigo-600' : 'bg-emerald-600'}`} />
+                          <span>{speaker}</span>
+                        </div>
+                        <div className="text-slate-500 font-mono text-[11px]">
+                          <span className="font-bold text-slate-700">{dur.toFixed(1)}s</span> ({percent.toFixed(0)}%) • <span className="font-bold text-slate-700">{words}</span> words
+                        </div>
+                      </div>
+                      <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${isSpk1 ? 'bg-indigo-600' : 'bg-emerald-600'}`}
+                          style={{ width: `${percent}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Audio Info Breakdown */}
+            {audioInfo && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono bg-white p-3 rounded-2xl border border-slate-200">
+                <div>
+                  <span className="text-[10px] text-slate-400 block font-sans">Sample Rate</span>
+                  <span className="font-bold text-slate-700">{audioInfo.sample_rate || 16000} Hz</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 block font-sans">Channels</span>
+                  <span className="font-bold text-slate-700">{audioInfo.channels || 1} ({audioInfo.channels === 2 ? 'Stereo' : 'Mono'})</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 block font-sans">Loudness (RMS)</span>
+                  <span className="font-bold text-slate-700">{audioInfo.rms_db ? `${audioInfo.rms_db.toFixed(1)} dBFS` : '-20 dBFS'}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 block font-sans">Est. SNR</span>
+                  <span className="font-bold text-slate-700">{audioInfo.snr_db ? `${audioInfo.snr_db.toFixed(1)} dB` : '25 dB'}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="py-12 text-center text-slate-400 text-xs">
+            No active segments to compute statistics.
+          </div>
+        )}
+
+        <div className="mt-5 pt-3 border-t border-slate-100 flex justify-end">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

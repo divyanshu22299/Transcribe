@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import {
-  Play, Pause, Square, Plus, Trash2, Split, Merge, AlertCircle, AlertTriangle,
-  Search, Filter, User, Check, Sparkles, Volume2, HelpCircle
+  Play, Square, Plus, Trash2, Split, Merge, AlertCircle, AlertTriangle,
+  Search, Sparkles, Volume2, Film, LayoutList, LayoutGrid
 } from 'lucide-react';
 
 export default function SegmentEditor({
@@ -13,12 +13,50 @@ export default function SegmentEditor({
   onStopSegment,
   onLintTrigger,
   onStartTranscribe,
-  audioLoaded
+  audioLoaded,
+  onOpenSrtPreview
 }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterSpeaker, setFilterSpeaker] = useState('ALL');
   const [filterErrorsOnly, setFilterErrorsOnly] = useState(false);
+  const [minConfidence, setMinConfidence] = useState(0);
+  const [isCompactView, setIsCompactView] = useState(false);
   const [showHeatmapGuide, setShowHeatmapGuide] = useState(false);
+  const [nudgeStep, setNudgeStep] = useState(0.05);
+
+  const formatTimestampStr = (secs) => {
+    const s = Math.max(0, secs);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = Math.floor(s % 60);
+    const ms = Math.round((s - Math.floor(s)) * 1000);
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+  };
+
+  // UI-07: Keyboard navigation between segments with Alt+ArrowDown / Alt+ArrowUp
+  React.useEffect(() => {
+    const handleSegmentNav = (e) => {
+      if (e.altKey && e.key === 'ArrowDown') {
+        e.preventDefault();
+        const currIdx = segments.findIndex((s) => s.segment_id === activeSegmentId);
+        if (currIdx >= 0 && currIdx < segments.length - 1) {
+          const nextSeg = segments[currIdx + 1];
+          setActiveSegmentId(nextSeg.segment_id);
+          onPlaySegment(nextSeg.start_time, nextSeg.end_time);
+        }
+      } else if (e.altKey && e.key === 'ArrowUp') {
+        e.preventDefault();
+        const currIdx = segments.findIndex((s) => s.segment_id === activeSegmentId);
+        if (currIdx > 0) {
+          const prevSeg = segments[currIdx - 1];
+          setActiveSegmentId(prevSeg.segment_id);
+          onPlaySegment(prevSeg.start_time, prevSeg.end_time);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleSegmentNav);
+    return () => window.removeEventListener('keydown', handleSegmentNav);
+  }, [segments, activeSegmentId, onPlaySegment, setActiveSegmentId]);
 
   const updateSegmentField = (segmentId, field, value) => {
     const updated = segments.map((seg) => {
@@ -26,6 +64,8 @@ export default function SegmentEditor({
         const newSeg = { ...seg, [field]: value };
         if (field === 'start_time' || field === 'end_time') {
           newSeg.duration = Math.max(0, parseFloat((newSeg.end_time - newSeg.start_time).toFixed(3)));
+          newSeg.start_time_str = formatTimestampStr(newSeg.start_time);
+          newSeg.end_time_str = formatTimestampStr(newSeg.end_time);
         }
         return newSeg;
       }
@@ -128,6 +168,10 @@ export default function SegmentEditor({
     return segments.filter((seg) => {
       if (filterSpeaker !== 'ALL' && seg.speaker !== filterSpeaker) return false;
       if (filterErrorsOnly && (!seg.qc_errors || seg.qc_errors.length === 0)) return false;
+      if (minConfidence > 0) {
+        const segConf = (seg.confidence !== undefined && seg.confidence !== null ? seg.confidence : 1.0) * 100;
+        if (segConf < minConfidence) return false;
+      }
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
         const matchText = (seg.transcript || '').toLowerCase().includes(q);
@@ -136,12 +180,17 @@ export default function SegmentEditor({
       }
       return true;
     });
-  }, [segments, filterSpeaker, filterErrorsOnly, searchQuery]);
+  }, [segments, filterSpeaker, filterErrorsOnly, minConfidence, searchQuery]);
+
+  const uniqueSpeakers = useMemo(() => {
+    const names = new Set(segments.map((s) => s.speaker).filter(Boolean));
+    return Array.from(names).sort();
+  }, [segments]);
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-2xs flex flex-col flex-1 min-h-[500px]">
-      {/* Sleek Sub-Header & Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
+      {/* Sleek Sub-Header & Controls (Sticky while scrolling) */}
+      <div className="sticky top-0 z-20 bg-white/95 backdrop-blur-xs flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-100 pt-0.5">
         <div className="flex items-center gap-2">
           <h2 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Segments</h2>
           <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-bold border border-slate-200">
@@ -180,8 +229,9 @@ export default function SegmentEditor({
             className="px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-[11px] font-semibold text-slate-700 cursor-pointer"
           >
             <option value="ALL">All Speakers</option>
-            <option value="Speaker 1">Speaker 1</option>
-            <option value="Speaker 2">Speaker 2</option>
+            {uniqueSpeakers.map((spk) => (
+              <option key={spk} value={spk}>{spk}</option>
+            ))}
           </select>
 
           {/* Errors Only Filter */}
@@ -195,6 +245,63 @@ export default function SegmentEditor({
           >
             Issues Only
           </button>
+
+          {/* Nudge Step Selector */}
+          <select
+            value={nudgeStep}
+            onChange={(e) => setNudgeStep(parseFloat(e.target.value))}
+            className="px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-[11px] font-semibold text-slate-700 cursor-pointer"
+            title="Timestamp nudge step precision"
+          >
+            <option value={0.01}>±10ms</option>
+            <option value={0.05}>±50ms</option>
+            <option value={0.1}>±100ms</option>
+            <option value={0.5}>±500ms</option>
+            <option value={1.0}>±1.0s</option>
+          </select>
+
+          {/* Confidence Filter Slider */}
+          <div className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-50 border border-slate-200 rounded-lg text-[11px]">
+            <span className="text-slate-500 font-semibold text-[10px]">Conf:</span>
+            <input
+              type="range"
+              min="0"
+              max="95"
+              step="5"
+              value={minConfidence}
+              onChange={(e) => setMinConfidence(Number(e.target.value))}
+              className="w-14 accent-indigo-600 cursor-pointer h-1"
+              title={`Filter segments with confidence ≥ ${minConfidence}%`}
+            />
+            <span className="font-mono text-[10px] font-bold text-slate-700 min-w-[28px]">
+              {minConfidence > 0 ? `≥${minConfidence}%` : 'All'}
+            </span>
+          </div>
+
+          {/* Compact / Expanded Toggle */}
+          <button
+            onClick={() => setIsCompactView(!isCompactView)}
+            className={`p-1 rounded-lg border text-[11px] font-semibold transition-colors cursor-pointer ${
+              isCompactView
+                ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+            }`}
+            title={isCompactView ? 'Switch to Expanded View' : 'Switch to Compact View'}
+          >
+            {isCompactView ? <LayoutGrid className="w-3.5 h-3.5" /> : <LayoutList className="w-3.5 h-3.5" />}
+          </button>
+
+          {/* SRT Live Preview Button */}
+          {onOpenSrtPreview && (
+            <button
+              onClick={onOpenSrtPreview}
+              className="flex items-center gap-1 px-2 py-1 bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 hover:border-indigo-200 rounded-lg text-[11px] font-bold transition-colors cursor-pointer"
+              title="Open Live SRT Subtitle Preview & Quality Audit"
+            >
+              <Film className="w-3 h-3 text-indigo-600" />
+              <span>SRT Preview</span>
+            </button>
+          )}
 
           {/* Add Segment Button */}
           <button
@@ -288,7 +395,7 @@ export default function SegmentEditor({
               <div
                 key={seg.segment_id}
                 onClick={() => setActiveSegmentId(seg.segment_id)}
-                className={`p-3 rounded-xl border transition-all ${
+                className={`${isCompactView ? 'p-2 rounded-lg' : 'p-3 rounded-xl'} border transition-all ${
                   isActive
                     ? 'bg-indigo-50/40 border-indigo-500 shadow-sm ring-1 ring-indigo-500/20'
                     : hasErrors
@@ -299,7 +406,7 @@ export default function SegmentEditor({
                 }`}
               >
                 {/* Segment Top Control Bar (Compact Single Row) */}
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <div className={`flex flex-wrap items-center justify-between gap-1.5 ${isCompactView ? 'mb-1' : 'mb-2'}`}>
                   {/* Left: Play/Loop & Stop Buttons, Segment #, Speaker & Gender */}
                   <div className="flex items-center gap-1.5">
                     {/* Play / Loop Segment Button */}
@@ -350,9 +457,15 @@ export default function SegmentEditor({
                           : 'bg-emerald-50 text-emerald-700 border-emerald-200'
                       }`}
                     >
-                      <option value="Speaker 1">Speaker 1</option>
-                      <option value="Speaker 2">Speaker 2</option>
-                      <option value="Speaker 3">Speaker 3</option>
+                      {uniqueSpeakers.map((spk) => (
+                        <option key={spk} value={spk}>{spk}</option>
+                      ))}
+                      {/* Always allow adding Speaker N+1 */}
+                      {!uniqueSpeakers.includes(`Speaker ${uniqueSpeakers.length + 1}`) && (
+                        <option value={`Speaker ${uniqueSpeakers.length + 1}`}>
+                          + Speaker {uniqueSpeakers.length + 1}
+                        </option>
+                      )}
                     </select>
 
                     {/* Gender Selector */}
@@ -377,16 +490,18 @@ export default function SegmentEditor({
                   {/* Right: Millisecond Timestamps & Actions */}
                   <div className="flex items-center gap-1 font-mono text-[11px] text-slate-600">
                     {/* Start Time Input with Micro-Nudge */}
-                    <div className="flex items-center gap-0.5 bg-slate-50 px-1.5 py-0.5 rounded-lg border border-slate-200 shadow-2xs">
+                    <div className={`flex items-center gap-0.5 bg-slate-50 px-1.5 py-0.5 rounded-lg border shadow-2xs ${
+                      seg.start_time >= seg.end_time ? 'border-rose-400 bg-rose-50' : 'border-slate-200'
+                    }`}>
                       <span className="text-slate-400 text-[9px] font-bold">START</span>
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          updateSegmentField(seg.segment_id, 'start_time', parseFloat(Math.max(0, seg.start_time - 0.05).toFixed(3)));
+                          updateSegmentField(seg.segment_id, 'start_time', parseFloat(Math.max(0, seg.start_time - nudgeStep).toFixed(3)));
                         }}
                         className="px-0.5 text-[9px] text-slate-400 hover:text-indigo-600 hover:bg-slate-200 rounded cursor-pointer"
-                        title="Nudge -0.05s"
+                        title={`Nudge -${nudgeStep}s`}
                       >
                         ◀
                       </button>
@@ -401,10 +516,10 @@ export default function SegmentEditor({
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          updateSegmentField(seg.segment_id, 'start_time', parseFloat((seg.start_time + 0.05).toFixed(3)));
+                          updateSegmentField(seg.segment_id, 'start_time', parseFloat((seg.start_time + nudgeStep).toFixed(3)));
                         }}
                         className="px-0.5 text-[9px] text-slate-400 hover:text-indigo-600 hover:bg-slate-200 rounded cursor-pointer"
-                        title="Nudge +0.05s"
+                        title={`Nudge +${nudgeStep}s`}
                       >
                         ▶
                       </button>
@@ -414,16 +529,18 @@ export default function SegmentEditor({
                     <span className="text-slate-400">→</span>
 
                     {/* End Time Input with Micro-Nudge */}
-                    <div className="flex items-center gap-0.5 bg-slate-50 px-1.5 py-0.5 rounded-lg border border-slate-200 shadow-2xs">
+                    <div className={`flex items-center gap-0.5 bg-slate-50 px-1.5 py-0.5 rounded-lg border shadow-2xs ${
+                      seg.start_time >= seg.end_time ? 'border-rose-400 bg-rose-50' : 'border-slate-200'
+                    }`}>
                       <span className="text-slate-400 text-[9px] font-bold">END</span>
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          updateSegmentField(seg.segment_id, 'end_time', parseFloat(Math.max(seg.start_time + 0.1, seg.end_time - 0.05).toFixed(3)));
+                          updateSegmentField(seg.segment_id, 'end_time', parseFloat(Math.max(seg.start_time + 0.1, seg.end_time - nudgeStep).toFixed(3)));
                         }}
                         className="px-0.5 text-[9px] text-slate-400 hover:text-indigo-600 hover:bg-slate-200 rounded cursor-pointer"
-                        title="Nudge -0.05s"
+                        title={`Nudge -${nudgeStep}s`}
                       >
                         ◀
                       </button>
@@ -438,10 +555,10 @@ export default function SegmentEditor({
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          updateSegmentField(seg.segment_id, 'end_time', parseFloat((seg.end_time + 0.05).toFixed(3)));
+                          updateSegmentField(seg.segment_id, 'end_time', parseFloat((seg.end_time + nudgeStep).toFixed(3)));
                         }}
                         className="px-0.5 text-[9px] text-slate-400 hover:text-indigo-600 hover:bg-slate-200 rounded cursor-pointer"
-                        title="Nudge +0.05s"
+                        title={`Nudge +${nudgeStep}s`}
                       >
                         ▶
                       </button>
@@ -449,13 +566,23 @@ export default function SegmentEditor({
                     </div>
 
                     {/* Duration Badge */}
-                    <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
-                      seg.duration > 20 || seg.duration < 0.5
-                        ? 'bg-rose-100 text-rose-700 border border-rose-300'
-                        : 'text-slate-500 bg-slate-100'
-                    }`}>
-                      {seg.duration.toFixed(2)}s
-                    </span>
+                    {(() => {
+                      const isInvalid = seg.start_time >= seg.end_time;
+                      const isOutOfRange = seg.duration > 20 || seg.duration < 0.5;
+                      const isWarn = isInvalid || isOutOfRange;
+                      return (
+                        <span
+                          className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
+                            isWarn
+                              ? 'bg-rose-100 text-rose-700 border border-rose-300'
+                              : 'text-slate-500 bg-slate-100'
+                          }`}
+                          title={isInvalid ? '⚠️ Start time must be less than end time!' : isOutOfRange ? '⚠️ Duration out of range (0.5s–20s)' : ''}
+                        >
+                          {isInvalid ? '⚠️ INVALID' : `${seg.duration.toFixed(2)}s`}
+                        </span>
+                      );
+                    })()}
 
                     {/* Actions: Split / Merge / Delete */}
                     <div className="flex items-center gap-0.5 ml-1 border-l border-slate-200 pl-1">
@@ -546,7 +673,7 @@ export default function SegmentEditor({
                 {/* Verbatim Transcript Textarea */}
                 <div className="mt-1">
                   <textarea
-                    rows={2}
+                    rows={isCompactView ? 1 : 2}
                     value={seg.transcript}
                     onChange={(e) => updateSegmentField(seg.segment_id, 'transcript', e.target.value)}
                     placeholder="Type full verbatim transcription exactly as spoken..."
@@ -556,8 +683,22 @@ export default function SegmentEditor({
                     data-enable-grammarly="false"
                     autoCorrect="off"
                     autoCapitalize="off"
-                    className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-sm text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-100 resize-y leading-relaxed font-sans transition-all"
+                    className={`w-full bg-white border border-slate-200 rounded-lg ${isCompactView ? 'p-1.5 text-xs' : 'p-2.5 text-sm'} text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-100 resize-y leading-relaxed font-sans transition-all`}
                   />
+                  {/* SRT-06: Character counter with broadcast SRT line-length warning */}
+                  <div className="flex items-center justify-between mt-0.5 px-0.5 text-[10px] font-mono">
+                    <span className="text-slate-400">
+                      {seg.words && seg.words.length > 0 ? `${seg.words.length} words` : `${(seg.transcript || '').trim().split(/\s+/).filter(Boolean).length} words`}
+                    </span>
+                    <span className={`${
+                      (seg.transcript || '').length > 42
+                        ? 'text-rose-600 font-bold bg-rose-50 px-1.5 py-0.2 rounded border border-rose-200'
+                        : 'text-slate-400'
+                    }`}>
+                      {(seg.transcript || '').length} chars
+                      {(seg.transcript || '').length > 42 && ' ⚠️ >42 (SRT limit)'}
+                    </span>
+                  </div>
                 </div>
 
                 {/* QC Rule Violations Badges */}

@@ -456,3 +456,194 @@ def extract_audio_slice(audio_path: str, start_sec: float, end_sec: float, outpu
         chunk = sound[int(start_sec * 1000):int(end_sec * 1000)]
         chunk.export(output_path, format="wav")
         return output_path
+
+
+def detect_dual_channel_layout(audio_path: str) -> Dict[str, Any]:
+    """
+    Checks if a WAV file contains discrete 2-channel audio (Left = Speaker 1, Right = Speaker 2).
+    Computes cross-channel correlation to distinguish true dual-track audio from mono stereo.
+    """
+    try:
+        data, samplerate = sf.read(audio_path)
+        if len(data.shape) < 2 or data.shape[1] < 2:
+            return {"is_dual_channel": False, "channels": 1, "correlation": 1.0}
+
+        left = data[:, 0]
+        right = data[:, 1]
+
+        # Check RMS of each channel
+        rms_left = float(np.sqrt(np.mean(left**2)))
+        rms_right = float(np.sqrt(np.mean(right**2)))
+
+        if rms_left < 1e-6 and rms_right < 1e-6:
+            return {"is_dual_channel": False, "channels": 2, "correlation": 1.0}
+
+        # Subsample for fast correlation check
+        step = max(1, len(left) // 50000)
+        sub_l = left[::step]
+        sub_r = right[::step]
+
+        # Pearson correlation between Left and Right channels
+        std_l = float(np.std(sub_l))
+        std_r = float(np.std(sub_r))
+
+        if std_l > 1e-6 and std_r > 1e-6:
+            corr = float(np.corrcoef(sub_l, sub_r)[0, 1])
+        else:
+            corr = 1.0
+
+        # If correlation < 0.92 and both channels contain distinct signal, it is true dual-channel!
+        is_discrete_stereo = bool(corr < 0.92 and (rms_left > 1e-5 or rms_right > 1e-5))
+
+        return {
+            "is_dual_channel": is_discrete_stereo,
+            "channels": 2,
+            "correlation": round(corr, 3),
+            "rms_left_db": round(20 * math.log10(max(1e-7, rms_left)), 2),
+            "rms_right_db": round(20 * math.log10(max(1e-7, rms_right)), 2)
+        }
+    except Exception:
+        return {"is_dual_channel": False, "channels": 1, "correlation": 1.0}
+
+
+def extract_physical_speech_intervals(
+    audio_path: str,
+    min_dur: float = 0.5,
+    max_dur: float = 20.0,
+    silence_gap: float = 0.35
+) -> List[Dict[str, Any]]:
+    """
+    Extracts physical ground-truth speech intervals directly from raw PCM audio waveform samples.
+    - If 2-Channel Stereo: Channel 0 is tagged as Speaker 1, Channel 1 is tagged as Speaker 2.
+    - If Mono: Uses dual-threshold energy VAD to find exact physical speech onset and decay timestamps.
+    Returns: List of {"start_time": float, "end_time": float, "speaker": str, "channel": int}
+    """
+    try:
+        data, samplerate = sf.read(audio_path)
+    except Exception:
+        return []
+
+    is_stereo = len(data.shape) > 1 and data.shape[1] >= 2
+    channel_info = detect_dual_channel_layout(audio_path) if is_stereo else {"is_dual_channel": False}
+    is_dual_channel = channel_info.get("is_dual_channel", False)
+
+    frame_len = int(samplerate * 0.02)  # 20ms frame
+    hop_len = int(samplerate * 0.01)    # 10ms hop
+
+    intervals: List[Dict[str, Any]] = []
+
+    if is_dual_channel:
+        # Separate VAD on Left (Speaker 1) and Right (Speaker 2)
+        for ch_idx, speaker_label in [(0, "Speaker 1"), (1, "Speaker 2")]:
+            ch_data = data[:, ch_idx]
+            # Pre-emphasis filter
+            pre_emph = np.append(ch_data[0], ch_data[1:] - 0.95 * ch_data[:-1])
+
+            ch_energies = []
+            ch_times = []
+            for f_idx in range(0, len(pre_emph) - frame_len, hop_len):
+                frame = pre_emph[f_idx:f_idx + frame_len]
+                rms = float(np.sqrt(np.mean(frame**2)))
+                ch_energies.append(rms)
+                ch_times.append(f_idx / samplerate)
+
+            if not ch_energies:
+                continue
+
+            ch_energies = np.array(ch_energies)
+            ch_times = np.array(ch_times)
+
+            noise_floor = float(np.percentile(ch_energies, 15))
+            dyn_range = float(np.max(ch_energies)) - noise_floor
+
+            if dyn_range < 1e-4:
+                continue
+
+            thresh_trigger = noise_floor + 0.18 * dyn_range
+            thresh_hold = noise_floor + 0.06 * dyn_range
+
+            in_speech = False
+            seg_s = 0.0
+
+            for idx, e in enumerate(ch_energies):
+                t = ch_times[idx]
+                if not in_speech:
+                    if e >= thresh_trigger:
+                        in_speech = True
+                        seg_s = max(0.0, t - 0.040)
+                else:
+                    if e < thresh_hold or (t - seg_s) >= max_dur:
+                        # Check silence lookahead
+                        is_end = True
+                        lookahead = int(silence_gap / 0.01)
+                        if (t - seg_s) < max_dur and idx + lookahead < len(ch_energies):
+                            if np.max(ch_energies[idx:idx + lookahead]) >= thresh_trigger:
+                                is_end = False
+
+                        if is_end:
+                            seg_e = min(len(data) / samplerate, t + 0.040)
+                            if seg_e - seg_s >= min_dur:
+                                intervals.append({
+                                    "start_time": round(seg_s, 3),
+                                    "end_time": round(seg_e, 3),
+                                    "duration": round(seg_e - seg_s, 3),
+                                    "speaker": speaker_label,
+                                    "channel": ch_idx
+                                })
+                            in_speech = False
+
+        # Sort combined dual-channel intervals chronologically
+        intervals.sort(key=lambda x: x["start_time"])
+    else:
+        # Mono or Joint-Stereo physical VAD
+        mono_data = np.mean(data, axis=1) if is_stereo else data
+        pre_emph = np.append(mono_data[0], mono_data[1:] - 0.95 * mono_data[:-1])
+
+        energies = []
+        times = []
+        for f_idx in range(0, len(pre_emph) - frame_len, hop_len):
+            frame = pre_emph[f_idx:f_idx + frame_len]
+            rms = float(np.sqrt(np.mean(frame**2)))
+            energies.append(rms)
+            times.append(f_idx / samplerate)
+
+        if energies:
+            energies = np.array(energies)
+            times = np.array(times)
+            noise_floor = float(np.percentile(energies, 15))
+            dyn_range = float(np.max(energies)) - noise_floor
+
+            if dyn_range >= 1e-4:
+                thresh_trigger = noise_floor + 0.18 * dyn_range
+                thresh_hold = noise_floor + 0.06 * dyn_range
+
+                in_speech = False
+                seg_s = 0.0
+
+                for idx, e in enumerate(energies):
+                    t = times[idx]
+                    if not in_speech:
+                        if e >= thresh_trigger:
+                            in_speech = True
+                            seg_s = max(0.0, t - 0.040)
+                    else:
+                        if e < thresh_hold or (t - seg_s) >= max_dur:
+                            is_end = True
+                            lookahead = int(silence_gap / 0.01)
+                            if (t - seg_s) < max_dur and idx + lookahead < len(energies):
+                                if np.max(energies[idx:idx + lookahead]) >= thresh_trigger:
+                                    is_end = False
+
+                            if is_end:
+                                seg_e = min(len(mono_data) / samplerate, t + 0.040)
+                                if seg_e - seg_s >= min_dur:
+                                    intervals.append({
+                                        "start_time": round(seg_s, 3),
+                                        "end_time": round(seg_e, 3),
+                                        "duration": round(seg_e - seg_s, 3),
+                                        "speaker": "Speaker 1",
+                                        "channel": 0
+                                    })
+                                in_speech = False
+
+    return intervals

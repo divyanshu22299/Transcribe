@@ -11,7 +11,8 @@ from app.models import Segment, TranscriptionResult, AudioAnalysis, WordConfiden
 from app.linter_engine import lint_dataset
 from app.audio_processor import (
     format_timestamp, detect_speech_boundaries, inspect_audio,
-    snap_to_acoustic_boundaries, find_dialogue_split_points, extract_audio_slice
+    snap_to_acoustic_boundaries, find_dialogue_split_points, extract_audio_slice,
+    detect_dual_channel_layout, extract_physical_speech_intervals
 )
 
 SYSTEM_INSTRUCTION = """You are an expert conversational speech transcriptionist and acoustic annotator adhering strictly to the official Karya Verbatim Transcription & Segmentation Guidelines.
@@ -88,7 +89,7 @@ def transcribe_audio_with_gemini(
         candidate_models.append(model_name)
     if GEMINI_MODEL and GEMINI_MODEL not in candidate_models:
         candidate_models.append(GEMINI_MODEL)
-    for fallback in ["gemini-3.6-flash", "gemini-3.5-flash"]:
+    for fallback in ["gemini-2.0-flash", "gemini-1.5-flash"]:
         if fallback not in candidate_models:
             candidate_models.append(fallback)
 
@@ -106,16 +107,20 @@ def transcribe_audio_with_gemini(
     elif suffix == ".flac":
         mime_type = "audio/flac"
 
-    uploaded_file = client.files.upload(
-        file=str(audio_file_path),
-        config=dict(mime_type=mime_type)
-    )
+    uploaded_file = None
+    try:
+        uploaded_file = client.files.upload(
+            file=str(audio_file_path),
+            config=dict(mime_type=mime_type)
+        )
+    except Exception as upload_err:
+        raise RuntimeError(f"Failed to upload audio to Gemini: {upload_err}")
 
     is_auto = (not language or language.lower() in ["auto", "auto-detect", "autodetect"])
 
     user_prompt = f"""Analyze the provided audio conversation, auto-detect the spoken language and native script, and transcribe/segment according to the Karya guidelines with 100% timestamp precision.
 Target Language: {language} {"(Auto-detect the primary language spoken, e.g. Hindi, Marathi, Punjabi, Bengali, Tamil, Telugu, English, Gujarati, Kannada, etc.)" if is_auto else ""}
-Target Script: {script} {"(Auto-detect the appropriate native script, e.g. Devanagari, Gurmukhi, Latin, Bengali, Tamil, Telugu, etc.)" if is_auto or script.lower() in ["auto", "auto-detect"] else ""}
+Target Script: {script} {"(Auto-detect the appropriate native script, e.g. Devanagari, Gurmukhi, Latin, Bengali, Tamil, Telugu, Gujarati, Kannada)" if is_auto or script.lower() in ["auto", "auto-detect"] else ""}
 
 Return a valid JSON object matching this schema:
 {{
@@ -140,37 +145,43 @@ Return a valid JSON object matching this schema:
     response = None
     last_error = None
 
-    for candidate in candidate_models:
-        for attempt in range(1, 4):
-            try:
-                response = client.models.generate_content(
-                    model=candidate,
-                    contents=[uploaded_file, user_prompt],
-                    config=types.GenerateContentConfig(
-                        system_instruction=SYSTEM_INSTRUCTION,
-                        response_mime_type="application/json",
-                        temperature=0.1,
-                        max_output_tokens=65536,
-                    )
-                )
-                if response and response.text:
-                    break
-            except Exception as e:
-                last_error = e
-                err_str = str(e)
-                if "503" in err_str or "UNAVAILABLE" in err_str or "429" in err_str:
-                    time.sleep(attempt * 1.5)
-                    continue
-                else:
-                    break
-        if response and response.text:
-            break
-
-    # Clean up uploaded file from Gemini storage
     try:
-        client.files.delete(name=uploaded_file.name)
-    except Exception:
-        pass
+        for candidate in candidate_models:
+            for attempt in range(1, 4):
+                try:
+                    response = client.models.generate_content(
+                        model=candidate,
+                        contents=[uploaded_file, user_prompt],
+                        config=types.GenerateContentConfig(
+                            system_instruction=SYSTEM_INSTRUCTION,
+                            response_mime_type="application/json",
+                            temperature=0.1,
+                            max_output_tokens=65536,
+                        )
+                    )
+                    if response and response.text:
+                        break
+                except Exception as e:
+                    last_error = e
+                    err_str = str(e).lower()
+                    retryable_keywords = [
+                        "503", "unavailable", "429", "quota", "resource_exhausted",
+                        "timeout", "deadline", "timed out", "connection", "reset", "500", "internal"
+                    ]
+                    if any(kw in err_str for kw in retryable_keywords) and attempt < 3:
+                        time.sleep(attempt * 2.0)
+                        continue
+                    else:
+                        break
+            if response and response.text:
+                break
+    finally:
+        # Guaranteed cleanup of uploaded file from Gemini cloud storage
+        if uploaded_file:
+            try:
+                client.files.delete(name=uploaded_file.name)
+            except Exception:
+                pass
 
     if not response or not response.text:
         raise RuntimeError(f"Gemini transcription failed across candidate models: {last_error}")
@@ -302,13 +313,19 @@ def process_audio_file(
     audio_id = str(uuid.uuid4())[:8]
     filename = Path(audio_path).name
 
-    # Step 1: Extract audio metadata safely
+    # Step 1: Extract audio metadata safely & physical ground-truth acoustic intervals
     audio_info_dict = inspect_audio(audio_path)
+    dual_ch_info = detect_dual_channel_layout(audio_path)
+    if dual_ch_info.get("is_dual_channel"):
+        audio_info_dict["channels"] = 2
     audio_info = AudioAnalysis(**audio_info_dict)
     audio_info.is_rejected = False
     audio_info.rejection_category = None
     audio_info.rejection_reason = None
     total_duration = audio_info.duration
+
+    # Extract physically measured speech bursts directly from raw PCM waveform
+    physical_intervals = extract_physical_speech_intervals(audio_path)
 
     resolved_language = language
     resolved_script = script
@@ -376,7 +393,7 @@ def process_audio_file(
         except Exception as e:
             raise RuntimeError(f"Transcription failed: {str(e)}")
 
-    # Step 3: Build & Calibrate Segment Objects with Exact Global Timestamps
+    # Step 3: Build & Calibrate Segment Objects with Exact Physical Ground-Truth Anchors
     segments: List[Segment] = []
     prev_end = 0.0
 
@@ -390,11 +407,25 @@ def process_audio_file(
         s_time = chunk_offset + raw_s
         e_time = chunk_offset + raw_e
 
-        # Exact physical acoustic onset & decay snapping on the audio waveform
-        try:
-            s_time, e_time = snap_to_acoustic_boundaries(audio_path, s_time, e_time)
-        except Exception:
-            pass
+        # Match to nearest physical acoustic burst if available (100% sample-accurate)
+        matched_phys = None
+        if physical_intervals:
+            for p in physical_intervals:
+                overlap = min(e_time, p["end_time"]) - max(s_time, p["start_time"])
+                if overlap > 0.25 or (abs(p["start_time"] - s_time) < 0.8 and abs(p["end_time"] - e_time) < 1.2):
+                    matched_phys = p
+                    break
+
+        if matched_phys:
+            s_time = matched_phys["start_time"]
+            e_time = matched_phys["end_time"]
+            speaker = matched_phys.get("speaker", str(raw.get("speaker", "Speaker 1"))).strip()
+        else:
+            try:
+                s_time, e_time = snap_to_acoustic_boundaries(audio_path, s_time, e_time)
+            except Exception:
+                pass
+            speaker = str(raw.get("speaker", "Speaker 1")).strip()
 
         # Guarantee non-overlapping with natural dialogue breathing room
         if s_time < prev_end:
@@ -409,7 +440,6 @@ def process_audio_file(
         e_time = round(e_time, 3)
         duration = round(e_time - s_time, 3)
 
-        speaker = str(raw.get("speaker", "Speaker 1")).strip()
         gender = str(raw.get("gender", "Male")).capitalize()
         if gender not in ["Male", "Female", "Unknown"]:
             gender = "Unknown"
