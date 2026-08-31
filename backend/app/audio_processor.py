@@ -233,99 +233,91 @@ def snap_to_acoustic_boundaries(
     audio_path: str,
     raw_start: float,
     raw_end: float,
-    window_sec: float = 1.2,
+    collar_sec: float = 0.20,
 ) -> Tuple[float, float]:
     """
-    Refines a proposed start and end timestamp by snapping to the exact physical
-    vocal tract acoustic energy onset and decay points in the audio waveform (millisecond accuracy).
-    Uses high-frequency pre-emphasis, local adaptive noise floor estimation, and dual-threshold VAD.
+    Safely refines proposed start and end timestamps by finding the exact acoustic
+    speech onset and decay within a tight local micro-collar (+/- 0.20s).
+    Ensures timestamps stay tightly locked to the actual spoken phrase without jumping to neighboring speech.
     """
     try:
         data, samplerate = sf.read(audio_path)
         if len(data.shape) > 1:
             data = np.mean(data, axis=1)  # Convert to mono
-        
+
         total_sec = len(data) / float(samplerate)
         if total_sec <= 0.1:
             return round(raw_start, 3), round(raw_end, 3)
 
-        # Apply pre-emphasis filter to boost speech formants and unvoiced consonants
-        pre_emph = np.append(data[0], data[1:] - 0.95 * data[:-1])
+        frame_len = max(16, int(samplerate * 0.010))  # 10ms frame
+        hop_len = max(4, int(samplerate * 0.002))     # 2ms hop
 
-        frame_len = max(16, int(samplerate * 0.015))  # 15ms frame
-        hop_len = max(4, int(samplerate * 0.003))     # 3ms hop
-
-        # 1. Refine Start Time: search in [raw_start - window_sec, raw_start + window_sec]
-        search_s = max(0.0, raw_start - window_sec)
-        search_e = min(total_sec, raw_start + window_sec)
-        idx_s = int(search_s * samplerate)
-        idx_e = int(search_e * samplerate)
-        chunk_start = pre_emph[idx_s:idx_e]
+        # 1. Refine Start Time within tight [raw_start - 0.20, raw_start + 0.20]
+        s_min = max(0.0, raw_start - collar_sec)
+        s_max = min(total_sec, raw_start + collar_sec)
+        idx_s = int(s_min * samplerate)
+        idx_e = int(s_max * samplerate)
+        chunk_s = data[idx_s:idx_e]
 
         refined_start = raw_start
-        if len(chunk_start) > frame_len * 3:
-            energies = []
-            for f_idx in range(0, len(chunk_start) - frame_len, hop_len):
-                frame = chunk_start[f_idx:f_idx + frame_len]
-                rms = float(np.sqrt(np.mean(frame**2)))
-                energies.append(rms)
-            
-            if energies:
-                # Estimate local background noise floor (15th percentile)
-                noise_floor = float(np.percentile(energies, 15))
-                peak_energy = float(np.max(energies))
-                dynamic_range = peak_energy - noise_floor
+        if len(chunk_s) > frame_len * 2:
+            energies_s = [
+                float(np.sqrt(np.mean(chunk_s[f:f + frame_len]**2)))
+                for f in range(0, len(chunk_s) - frame_len, hop_len)
+            ]
+            if energies_s:
+                noise_s = float(np.percentile(energies_s, 20))
+                peak_s = float(np.max(energies_s))
+                thresh_s = noise_s + 0.15 * (peak_s - noise_s)
 
-                if dynamic_range > 1e-4:
-                    t_trigger = noise_floor + 0.22 * dynamic_range
-                    t_onset = noise_floor + 0.08 * dynamic_range
+                center_idx = int((raw_start - s_min) * samplerate / hop_len)
+                center_idx = max(0, min(len(energies_s) - 1, center_idx))
 
-                    for i in range(len(energies) - 2):
-                        if energies[i] >= t_trigger and energies[i+1] >= t_trigger:
-                            onset_idx = i
-                            while onset_idx > 0 and energies[onset_idx] >= t_onset:
-                                onset_idx -= 1
-                            
-                            first_speech_time = search_s + (onset_idx * hop_len) / samplerate
-                            refined_start = round(max(0.0, first_speech_time - 0.030), 3)
-                            break
+                # Walk backward from center to find speech onset
+                best_start_idx = center_idx
+                for idx in range(center_idx, -1, -1):
+                    if energies_s[idx] <= thresh_s:
+                        best_start_idx = idx
+                        break
 
-        # 2. Refine End Time: search in [raw_end - window_sec, raw_end + window_sec]
-        search_end_s = max(refined_start + 0.2, raw_end - window_sec)
-        search_end_e = min(total_sec, raw_end + window_sec)
-        idx_end_s = int(search_end_s * samplerate)
-        idx_end_e = int(search_end_e * samplerate)
-        chunk_end = pre_emph[idx_end_s:idx_end_e]
+                calc_start = s_min + (best_start_idx * hop_len) / samplerate
+                refined_start = round(calc_start, 3)
+
+        # 2. Refine End Time within tight [raw_end - 0.20, raw_end + 0.20]
+        e_min = max(refined_start + 0.2, raw_end - collar_sec)
+        e_max = min(total_sec, raw_end + collar_sec)
+        idx_e_s = int(e_min * samplerate)
+        idx_e_e = int(e_max * samplerate)
+        chunk_e = data[idx_e_s:idx_e_e]
 
         refined_end = raw_end
-        if len(chunk_end) > frame_len * 3:
-            energies_end = []
-            for f_idx in range(0, len(chunk_end) - frame_len, hop_len):
-                frame = chunk_end[f_idx:f_idx + frame_len]
-                rms = float(np.sqrt(np.mean(frame**2)))
-                energies_end.append(rms)
+        if len(chunk_e) > frame_len * 2:
+            energies_e = [
+                float(np.sqrt(np.mean(chunk_e[f:f + frame_len]**2)))
+                for f in range(0, len(chunk_e) - frame_len, hop_len)
+            ]
+            if energies_e:
+                noise_e = float(np.percentile(energies_e, 20))
+                peak_e = float(np.max(energies_e))
+                thresh_e = noise_e + 0.15 * (peak_e - noise_e)
 
-            if energies_end:
-                noise_floor_end = float(np.percentile(energies_end, 15))
-                peak_end = float(np.max(energies_end))
-                dynamic_range_end = peak_end - noise_floor_end
+                center_end_idx = int((raw_end - e_min) * samplerate / hop_len)
+                center_end_idx = max(0, min(len(energies_e) - 1, center_end_idx))
 
-                if dynamic_range_end > 1e-4:
-                    t_trigger_end = noise_floor_end + 0.20 * dynamic_range_end
-                    t_decay_end = noise_floor_end + 0.07 * dynamic_range_end
+                # Walk forward from center to find speech decay
+                best_end_idx = center_end_idx
+                for idx in range(center_end_idx, len(energies_e)):
+                    if energies_e[idx] <= thresh_e:
+                        best_end_idx = idx
+                        break
 
-                    for i in range(len(energies_end) - 1, 1, -1):
-                        if energies_end[i] >= t_trigger_end and energies_end[i-1] >= t_trigger_end:
-                            decay_idx = i
-                            while decay_idx < len(energies_end) - 1 and energies_end[decay_idx] >= t_decay_end:
-                                decay_idx += 1
-                            
-                            last_speech_time = search_end_s + (decay_idx * hop_len + frame_len) / samplerate
-                            refined_end = round(min(total_sec, last_speech_time + 0.040), 3)
-                            break
+                calc_end = e_min + (best_end_idx * hop_len) / samplerate
+                refined_end = round(calc_end, 3)
 
-        if refined_end <= refined_start:
-            refined_end = round(refined_start + 0.5, 3)
+        # Guardrails: never let refined duration drop below 0.4s
+        if refined_end - refined_start < 0.4:
+            refined_start = raw_start
+            refined_end = max(raw_start + 0.4, raw_end)
 
         return round(refined_start, 3), round(refined_end, 3)
     except Exception:
@@ -334,12 +326,12 @@ def snap_to_acoustic_boundaries(
 
 def find_dialogue_split_points(
     audio_path: str,
-    target_chunk_sec: float = 120.0,   # ~2 minutes
-    min_chunk_sec: float = 80.0,       # at least 1m 20s
-    max_chunk_sec: float = 160.0       # at most 2m 40s
+    target_chunk_sec: float = 60.0,    # ~1 minute chunks for zero AI timestamp drift
+    min_chunk_sec: float = 40.0,       # at least 40s
+    max_chunk_sec: float = 85.0        # at most 1m 25s
 ) -> List[Tuple[float, float]]:
     """
-    Partitions a long audio file into 2-3 minute subtask chunks.
+    Partitions a long audio file into 1-minute subtask chunks.
     CRITICAL: Splits ONLY at natural dialogue pauses / sentence completion silences
     so that words/sentences are NEVER cut in the middle.
     Returns list of (start_sec, end_sec) chunks covering the whole file without gaps.
@@ -645,5 +637,39 @@ def extract_physical_speech_intervals(
                                         "channel": 0
                                     })
                                 in_speech = False
-
     return intervals
+
+
+def resolve_segment_speaker_from_channels(
+    audio_path: str,
+    start_sec: float,
+    end_sec: float,
+    default_speaker: str = "Speaker 1"
+) -> str:
+    """
+    If audio is discrete 2-channel stereo, determines whether Left (Speaker 1)
+    or Right (Speaker 2) is speaking during [start_sec, end_sec] based on RMS energy ratio.
+    """
+    try:
+        data, samplerate = sf.read(audio_path)
+        if len(data.shape) < 2 or data.shape[1] < 2:
+            return default_speaker
+
+        idx_s = int(max(0.0, start_sec) * samplerate)
+        idx_e = int(min(len(data) / float(samplerate), end_sec) * samplerate)
+        if idx_e <= idx_s:
+            return default_speaker
+
+        left_slice = data[idx_s:idx_e, 0]
+        right_slice = data[idx_s:idx_e, 1]
+
+        rms_left = float(np.sqrt(np.mean(left_slice**2)))
+        rms_right = float(np.sqrt(np.mean(right_slice**2)))
+
+        if rms_left > rms_right * 1.35 and rms_left > 1e-4:
+            return "Speaker 1"
+        elif rms_right > rms_left * 1.35 and rms_right > 1e-4:
+            return "Speaker 2"
+        return default_speaker
+    except Exception:
+        return default_speaker

@@ -12,7 +12,8 @@ from app.linter_engine import lint_dataset
 from app.audio_processor import (
     format_timestamp, detect_speech_boundaries, inspect_audio,
     snap_to_acoustic_boundaries, find_dialogue_split_points, extract_audio_slice,
-    detect_dual_channel_layout, extract_physical_speech_intervals
+    detect_dual_channel_layout, extract_physical_speech_intervals,
+    resolve_segment_speaker_from_channels
 )
 
 SYSTEM_INSTRUCTION = """You are an expert conversational speech transcriptionist and acoustic annotator adhering strictly to the official Karya Verbatim Transcription & Segmentation Guidelines.
@@ -331,16 +332,15 @@ def process_audio_file(
     resolved_script = script
     raw_chunks_segments = []
 
-    # Step 2: Determine if chunking is needed (Split if duration > 150s / 2.5 minutes)
-    if total_duration > 150.0:
-        # Partition into clean 2-minute chunks strictly at natural dialogue silence breaks
+    # Step 2: Dialogue-Aware Subtask Chunking (Split into 50s chunks for tight timestamp sync)
+    if total_duration > 65.0:
         chunks = find_dialogue_split_points(
             audio_path,
-            target_chunk_sec=120.0,
-            min_chunk_sec=80.0,
-            max_chunk_sec=160.0
+            target_chunk_sec=50.0,
+            min_chunk_sec=35.0,
+            max_chunk_sec=75.0
         )
-        print(f"Dividing {total_duration:.1f}s audio into {len(chunks)} dialogue-aware subtask chunks...")
+        print(f"Dividing {total_duration:.1f}s audio into {len(chunks)} short dialogue subtask chunks...")
 
         for chunk_idx, (chunk_s, chunk_e) in enumerate(chunks, 1):
             slice_filename = f"temp_chunk_{audio_id}_{chunk_idx}.wav"
@@ -371,7 +371,7 @@ def process_audio_file(
                     except Exception:
                         pass
     else:
-        # Single-pass transcription for short audio (<= 150s)
+        # Single-pass transcription for short audio (<= 65s)
         try:
             data = transcribe_audio_with_gemini(
                 audio_path=audio_path,
@@ -393,7 +393,7 @@ def process_audio_file(
         except Exception as e:
             raise RuntimeError(f"Transcription failed: {str(e)}")
 
-    # Step 3: Build & Calibrate Segment Objects with Exact Physical Ground-Truth Anchors
+    # Step 3: Build & Calibrate Segment Objects with Monotonic Acoustic Tightening
     segments: List[Segment] = []
     prev_end = 0.0
 
@@ -407,31 +407,21 @@ def process_audio_file(
         s_time = chunk_offset + raw_s
         e_time = chunk_offset + raw_e
 
-        # Match to nearest physical acoustic burst if available (100% sample-accurate)
-        matched_phys = None
-        if physical_intervals:
-            for p in physical_intervals:
-                overlap = min(e_time, p["end_time"]) - max(s_time, p["start_time"])
-                if overlap > 0.25 or (abs(p["start_time"] - s_time) < 0.8 and abs(p["end_time"] - e_time) < 1.2):
-                    matched_phys = p
-                    break
+        # Micro-collar acoustic boundary snapping (+/- 0.15s)
+        try:
+            s_time, e_time = snap_to_acoustic_boundaries(audio_path, s_time, e_time, collar_sec=0.15)
+        except Exception:
+            pass
 
-        if matched_phys:
-            s_time = matched_phys["start_time"]
-            e_time = matched_phys["end_time"]
-            speaker = matched_phys.get("speaker", str(raw.get("speaker", "Speaker 1"))).strip()
-        else:
-            try:
-                s_time, e_time = snap_to_acoustic_boundaries(audio_path, s_time, e_time)
-            except Exception:
-                pass
-            speaker = str(raw.get("speaker", "Speaker 1")).strip()
+        # Discrete 2-channel stereo speaker identification
+        raw_speaker = str(raw.get("speaker", "Speaker 1")).strip()
+        speaker = resolve_segment_speaker_from_channels(audio_path, s_time, e_time, default_speaker=raw_speaker)
 
         # Guarantee non-overlapping with natural dialogue breathing room
         if s_time < prev_end:
-            s_time = round(prev_end + 0.060, 3)
+            s_time = round(prev_end + 0.050, 3)
         elif s_time == prev_end and i > 1:
-            s_time = round(prev_end + 0.060, 3)
+            s_time = round(prev_end + 0.050, 3)
 
         if e_time <= s_time:
             e_time = round(s_time + 0.5, 3)
@@ -439,6 +429,7 @@ def process_audio_file(
         s_time = round(s_time, 3)
         e_time = round(e_time, 3)
         duration = round(e_time - s_time, 3)
+        prev_end = e_time
 
         gender = str(raw.get("gender", "Male")).capitalize()
         if gender not in ["Male", "Female", "Unknown"]:
