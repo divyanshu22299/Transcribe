@@ -30,7 +30,8 @@ from app.db import init_db, get_db_session, DBProject, DBSegment
 
 from app.video_processor import (
     extract_audio_from_video, detect_shot_changes, get_video_metadata,
-    get_frame_rate, validate_video_file, get_supported_video_extensions
+    get_frame_rate, validate_video_file, get_supported_video_extensions,
+    get_supported_audio_extensions, get_supported_media_extensions, validate_media_file
 )
 from app.netflix_linter import lint_all_subtitles, auto_fix_subtitles, optimize_line_breaks
 from app.netflix_models import (
@@ -924,22 +925,22 @@ async def cancel_batch_task(task_id: str):
 
 @app.post("/api/subtitle/upload")
 async def upload_video(request: Request, file: UploadFile = File(...)):
-    """Upload single video file and perform initial inspection."""
+    """Upload media file (video or pure audio) and perform initial inspection."""
     client_ip = request.client.host if request.client else "127.0.0.1"
     _check_rate_limit(client_ip)
 
-    MAX_VIDEO_UPLOAD_SIZE = 4 * 1024 * 1024 * 1024  # 4 GB
-    if file.size and file.size > MAX_VIDEO_UPLOAD_SIZE:
+    MAX_UPLOAD_SIZE = 4 * 1024 * 1024 * 1024  # 4 GB
+    if file.size and file.size > MAX_UPLOAD_SIZE:
         raise HTTPException(
             status_code=413,
-            detail=f"File too large. Maximum supported video file size is 4GB."
+            detail=f"File too large. Maximum supported media file size is 4GB."
         )
 
     ext = Path(file.filename).suffix.lower()
-    if ext not in get_supported_video_extensions():
+    if ext not in get_supported_media_extensions():
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported video format {ext}. Supported formats: {', '.join(get_supported_video_extensions())}"
+            detail=f"Unsupported format {ext}. Supported formats: {', '.join(sorted(get_supported_media_extensions()))}"
         )
 
     unique_prefix = uuid.uuid4().hex[:8]
@@ -950,12 +951,14 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
-        if not validate_video_file(str(file_path)):
+        val = validate_media_file(str(file_path))
+        if not val["is_valid"]:
             if file_path.exists():
                 file_path.unlink()
-            raise HTTPException(status_code=400, detail="Invalid or corrupt video file.")
+            raise HTTPException(status_code=400, detail=val.get("error_message") or "Invalid or corrupt media file.")
             
-        metadata = get_video_metadata(str(file_path))
+        metadata = val.get("metadata") or get_video_metadata(str(file_path))
+        metadata["is_audio"] = val.get("is_audio_only", False)
     except HTTPException:
         raise
     except Exception as e:
@@ -963,11 +966,11 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
         traceback.print_exc()
         if file_path.exists():
             file_path.unlink()
-        raise HTTPException(status_code=500, detail=f"Error processing video upload: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error processing media upload: {str(e)}")
         
     video_id = Path(safe_filename).stem
 
-    # Pre-extract audio for instant waveform rendering and ultra-fast generation
+    # Pre-extract or convert audio for instant waveform rendering and ultra-fast generation
     audio_path = None
     try:
         from app.video_processor import extract_audio_from_video
@@ -975,6 +978,9 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
         audio_path = audio_info.get("audio_path")
     except Exception as e:
         print(f"Non-fatal audio extraction warning during upload: {e}")
+
+    if not audio_path and ext == ".wav":
+        audio_path = str(file_path)
 
     active_sessions[video_id] = {
         "filename": safe_filename,
@@ -992,32 +998,40 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
 
 
 def resolve_active_session_video(video_id: str) -> Optional[str]:
-    """Resolve video path from in-memory active_sessions or automatically restore from disk in UPLOAD_DIR."""
+    """Resolve media path (video or audio) from in-memory active_sessions or automatically restore from disk in UPLOAD_DIR."""
     if not video_id:
         return None
     if video_id in active_sessions and os.path.exists(active_sessions[video_id].get("file_path", "")):
         return active_sessions[video_id]["file_path"]
         
+    supported_exts = get_supported_media_extensions()
+
     # Check exact stem match
     for cand in UPLOAD_DIR.glob(f"{video_id}.*"):
-        if cand.is_file() and cand.suffix.lower() in [".mp4", ".mkv", ".mov", ".avi", ".webm"]:
+        if cand.is_file() and cand.suffix.lower() in supported_exts:
+            audio_cand = UPLOAD_DIR / f"{video_id}.wav"
+            if not audio_cand.exists():
+                audio_cand = UPLOAD_DIR / f"{video_id}_audio.wav"
             active_sessions[video_id] = {
                 "filename": cand.name,
                 "file_path": str(cand),
-                "audio_path": str(UPLOAD_DIR / f"{video_id}.wav"),
+                "audio_path": str(audio_cand) if audio_cand.exists() else None,
                 "created_at": time.time()
             }
             return str(cand)
 
     # Check prefix / substring match
     matches = list(UPLOAD_DIR.glob(f"{video_id}*"))
-    video_matches = [m for m in matches if m.is_file() and m.suffix.lower() in [".mp4", ".mov", ".mkv", ".webm", ".avi"]]
-    if video_matches:
-        cand = video_matches[0]
+    media_matches = [m for m in matches if m.is_file() and m.suffix.lower() in supported_exts]
+    if media_matches:
+        cand = media_matches[0]
+        audio_cand = UPLOAD_DIR / f"{cand.stem}.wav"
+        if not audio_cand.exists():
+            audio_cand = UPLOAD_DIR / f"{cand.stem}_audio.wav"
         active_sessions[video_id] = {
             "filename": cand.name,
             "file_path": str(cand),
-            "audio_path": str(UPLOAD_DIR / f"{cand.stem}.wav"),
+            "audio_path": str(audio_cand) if audio_cand.exists() else None,
             "created_at": time.time()
         }
         return str(cand)
@@ -1028,9 +1042,20 @@ def resolve_active_session_video(video_id: str) -> Optional[str]:
 @app.get("/api/subtitle/waveform/{video_id}")
 async def get_subtitle_waveform_endpoint(video_id: str, points_per_sec: int = 50):
     """Return high-precision acoustic waveform peaks for video_id matching speech ups and lows."""
-    audio_path = UPLOAD_DIR / f"{video_id}.wav"
-    
-    if not audio_path.exists():
+    audio_path = None
+    if video_id in active_sessions and active_sessions[video_id].get("audio_path"):
+        cand = Path(active_sessions[video_id]["audio_path"])
+        if cand.exists():
+            audio_path = cand
+
+    if not audio_path or not audio_path.exists():
+        for cand_name in [f"{video_id}.wav", f"{video_id}_audio.wav", f"{video_id}_16k.wav"]:
+            p = UPLOAD_DIR / cand_name
+            if p.exists():
+                audio_path = p
+                break
+
+    if not audio_path or not audio_path.exists():
         video_path = resolve_active_session_video(video_id)
         if video_path and os.path.exists(video_path):
             try:
@@ -1042,9 +1067,9 @@ async def get_subtitle_waveform_endpoint(video_id: str, points_per_sec: int = 50
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f"Failed to extract audio track: {e}")
         else:
-            raise HTTPException(status_code=404, detail="Video session or audio track not found.")
+            raise HTTPException(status_code=404, detail="Media session or audio track not found.")
             
-    if not audio_path.exists():
+    if not audio_path or not audio_path.exists():
         raise HTTPException(status_code=404, detail="Audio track not found.")
         
     try:
@@ -1304,11 +1329,26 @@ async def get_video_stream(request: Request, filename: str):
     range_header = request.headers.get("Range")
 
     suffix = file_path.suffix.lower()
-    media_type = "video/mp4"
-    if suffix == ".webm":
+    import mimetypes
+    guessed_type, _ = mimetypes.guess_type(str(file_path))
+    if guessed_type:
+        media_type = guessed_type
+    elif suffix in [".mp3"]:
+        media_type = "audio/mpeg"
+    elif suffix in [".wav"]:
+        media_type = "audio/wav"
+    elif suffix in [".m4a", ".aac"]:
+        media_type = "audio/mp4"
+    elif suffix in [".flac"]:
+        media_type = "audio/flac"
+    elif suffix in [".ogg"]:
+        media_type = "audio/ogg"
+    elif suffix in [".webm"]:
         media_type = "video/webm"
-    elif suffix == ".mkv":
+    elif suffix in [".mkv"]:
         media_type = "video/x-matroska"
+    else:
+        media_type = "video/mp4"
         
     if range_header:
         range_match = range_header.replace("bytes=", "").split("-")

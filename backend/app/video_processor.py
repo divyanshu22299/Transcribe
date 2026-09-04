@@ -92,12 +92,15 @@ def get_video_metadata(video_path: str) -> dict:
                         default_meta["audio_codec"] = stream.get("codec_name", "unknown")
                         default_meta["audio_channels"] = int(stream.get("channels", 0))
                         default_meta["audio_sample_rate"] = int(stream.get("sample_rate", 0))
+            default_meta["is_audio"] = (default_meta["width"] == 0 and default_meta["height"] == 0 and (default_meta["audio_channels"] > 0 or default_meta["duration"] > 0))
             return default_meta
     except Exception:
         pass
         
     # Robust fallback using ffmpeg -i directly
-    return _parse_metadata_via_ffmpeg(video_path, default_meta)
+    meta = _parse_metadata_via_ffmpeg(video_path, default_meta)
+    meta["is_audio"] = (meta.get("width", 0) == 0 and meta.get("height", 0) == 0 and (meta.get("audio_channels", 0) > 0 or meta.get("duration", 0) > 0))
+    return meta
 
 
 def _parse_metadata_via_ffmpeg(video_path: str, default_meta: dict) -> dict:
@@ -138,14 +141,24 @@ def _parse_metadata_via_ffmpeg(video_path: str, default_meta: dict) -> dict:
             default_meta["audio_channels"] = 2 if "stereo" in ch_str else 1
     except Exception:
         pass
+    default_meta["is_audio"] = (default_meta["width"] == 0 and default_meta["height"] == 0 and (default_meta["audio_channels"] > 0 or default_meta["duration"] > 0))
     return default_meta
 
 
 def extract_audio_from_video(video_path: str, output_path: str = None) -> dict:
-    """Extract audio track from video to WAV file using FFmpeg."""
+    """Extract or convert audio track from video/audio to 16kHz mono WAV file using FFmpeg."""
+    base_path = os.path.splitext(video_path)[0]
+    ext = Path(video_path).suffix.lower()
+
     if output_path is None:
-        base_path = os.path.splitext(video_path)[0]
-        output_path = f"{base_path}.wav"
+        if ext == ".wav":
+            output_path = f"{base_path}_audio.wav"
+        else:
+            output_path = f"{base_path}.wav"
+
+    # Avoid FFmpeg crashing if input and output path resolve to the same file
+    if os.path.abspath(video_path) == os.path.abspath(output_path):
+        output_path = f"{base_path}_16k.wav"
         
     ffmpeg_exe = get_ffmpeg_path()
     
@@ -192,7 +205,15 @@ def extract_audio_from_video(video_path: str, output_path: str = None) -> dict:
 
 
 def detect_shot_changes(video_path: str, threshold: float = 0.3) -> List[float]:
-    """Use FFmpeg scene detection filter to find shot changes."""
+    """Use FFmpeg scene detection filter to find shot changes (skipped for audio-only files)."""
+    ext = Path(video_path).suffix.lower()
+    if ext in get_supported_audio_extensions():
+        return []
+
+    meta = get_video_metadata(video_path)
+    if meta.get("width", 0) == 0 or meta.get("codec") in ["unknown", "none"]:
+        return []
+
     ffmpeg_exe = get_ffmpeg_path()
     
     cmd = [
@@ -282,41 +303,60 @@ def generate_video_thumbnail(video_path: str, time_seconds: float, output_path: 
 
 
 def get_supported_video_extensions() -> set:
-    """Return set of supported extensions."""
+    """Return set of supported video extensions."""
     return {'.mp4', '.mkv', '.mov', '.avi', '.webm', '.m4v', '.wmv', '.flv'}
 
 
-def validate_video_file(video_path: str) -> dict:
-    """Check if file exists, has valid extension, has video stream, has audio stream."""
+def get_supported_audio_extensions() -> set:
+    """Return set of supported audio extensions."""
+    return {'.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.wma', '.opus'}
+
+
+def get_supported_media_extensions() -> set:
+    """Return union of supported video and audio extensions."""
+    return get_supported_video_extensions() | get_supported_audio_extensions()
+
+
+def validate_media_file(media_path: str) -> dict:
+    """Check if file exists, has valid media extension, and has audio or video stream."""
     res = {
         "is_valid": False,
         "has_video": False,
         "has_audio": False,
+        "is_audio_only": False,
         "error_message": "",
         "metadata": {}
     }
     
-    if not Path(video_path).exists():
+    if not Path(media_path).exists():
         res["error_message"] = "File does not exist."
         return res
         
-    ext = Path(video_path).suffix.lower()
-    if ext not in get_supported_video_extensions():
-        res["error_message"] = f"Unsupported extension: {ext}"
+    ext = Path(media_path).suffix.lower()
+    if ext not in get_supported_media_extensions():
+        res["error_message"] = f"Unsupported media format {ext}. Supported formats: {', '.join(sorted(get_supported_media_extensions()))}"
         return res
         
-    meta = get_video_metadata(video_path)
+    meta = get_video_metadata(media_path)
     res["metadata"] = meta
     
-    if meta["codec"] != "unknown" and meta["width"] > 0:
+    if meta.get("codec") != "unknown" and meta.get("width", 0) > 0:
         res["has_video"] = True
         
-    if meta["audio_codec"] != "unknown" and meta["audio_channels"] > 0:
+    if (meta.get("audio_codec") != "unknown" and meta.get("audio_channels", 0) > 0) or ext in get_supported_audio_extensions() or meta.get("duration", 0) > 0:
         res["has_audio"] = True
         
-    if not res["has_video"]:
-        res["error_message"] = "No valid video stream found."
+    if not res["has_video"] and not res["has_audio"]:
+        res["error_message"] = "No valid video or audio stream found in media file."
         return res
         
+    res["is_audio_only"] = not res["has_video"] and res["has_audio"]
+    meta["is_audio"] = res["is_audio_only"]
     res["is_valid"] = True
     return res
+
+
+def validate_video_file(video_path: str) -> dict:
+    """Check media validity, supporting both video and audio files."""
+    return validate_media_file(video_path)
+

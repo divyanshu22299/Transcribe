@@ -726,7 +726,7 @@ function TranscribeApp({ onBackToHome }) {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100/60 text-slate-900 flex flex-col font-sans">
+    <div className="min-h-screen bg-[#0e0f12] text-[#f1f2f6] flex flex-col font-sans select-none">
       {/* Top Navbar (Ultra Compact) */}
       <Navbar
         hasApiKey={hasApiKey}
@@ -749,9 +749,9 @@ function TranscribeApp({ onBackToHome }) {
       />
 
       {/* Main Studio Area (Maximized Screen Height & Space) */}
-      <main className="flex-1 w-full px-2 sm:px-4 py-2 space-y-2 flex flex-col">
-        {/* Unified Top Control Toolbar (Single Line, Ultra Compact) */}
-        <div className="bg-white border border-slate-200 rounded-xl p-2 shadow-2xs">
+      <main className="flex-1 w-full px-2 sm:px-3 py-1.5 space-y-1.5 flex flex-col min-h-0">
+        {/* Unified Top Control Toolbar (Single Line, Ultra Compact NLE Style) */}
+        <div className="bg-[#14151a] border border-[#262734] rounded-lg p-2 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
             
             {/* Group 1: Ingestion & Transcribe */}
@@ -765,26 +765,26 @@ function TranscribeApp({ onBackToHome }) {
               />
               <label
                 htmlFor="main-file-input"
-                className="inline-flex items-center gap-1.5 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold cursor-pointer transition-all shadow-2xs active:scale-95 whitespace-nowrap"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#22232c] hover:bg-[#2c2d38] border border-[#323444] text-[#f1f2f6] rounded text-xs font-semibold cursor-pointer transition-all active:scale-95 whitespace-nowrap"
               >
-                <Upload className="w-3.5 h-3.5" />
-                <span>{selectedFile ? 'Change' : 'Upload Audio'}</span>
+                <Upload className="w-3.5 h-3.5 text-[#00e5be]" />
+                <span>{selectedFile ? 'Change Audio' : 'Import Audio'}</span>
               </label>
 
               {selectedFile && (
-                <div className="inline-flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200 text-[11px] font-bold text-slate-800 max-w-[180px] truncate">
-                  <FileAudio className="w-3 h-3 text-indigo-600 shrink-0" />
+                <div className="inline-flex items-center gap-1 bg-[#181920] px-2 py-0.5 rounded border border-[#262734] text-[11px] font-medium text-slate-300 max-w-[180px] truncate">
+                  <FileAudio className="w-3 h-3 text-[#00e5be] shrink-0" />
                   <span className="truncate">{selectedFile.name}</span>
                 </div>
               )}
 
               {/* Language Selector */}
-              <div className="inline-flex items-center gap-1 text-[11px] text-slate-600">
+              <div className="inline-flex items-center gap-1 text-[11px] text-[#7d8190]">
                 <span className="font-semibold text-slate-400">Lang:</span>
                 <select
                   value={targetLanguage}
                   onChange={(e) => setTargetLanguage(e.target.value)}
-                  className="bg-slate-50 border border-slate-300 px-2 py-0.5 rounded-md text-[11px] font-bold text-slate-800 cursor-pointer"
+                  className="bg-[#181920] border border-[#262734] text-[#f1f2f6] px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer focus:border-[#00e5be] focus:outline-none"
                 >
                   <option value="Auto-Detect">⚡ Auto-Detect</option>
                   <option value="Hindi">Hindi (हिन्दी)</option>
@@ -799,12 +799,12 @@ function TranscribeApp({ onBackToHome }) {
               </div>
 
               {/* Script Selector */}
-              <div className="inline-flex items-center gap-1 text-[11px] text-slate-600">
+              <div className="inline-flex items-center gap-1 text-[11px] text-[#7d8190]">
                 <span className="font-semibold text-slate-400">Script:</span>
                 <select
                   value={targetScript}
                   onChange={(e) => setTargetScript(e.target.value)}
-                  className="bg-slate-50 border border-slate-300 px-2 py-0.5 rounded-md text-[11px] font-bold text-slate-800 cursor-pointer"
+                  className="bg-[#181920] border border-[#262734] text-[#f1f2f6] px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer focus:border-[#00e5be] focus:outline-none"
                 >
                   <option value="Auto-Detect">⚡ Auto-Detect</option>
                   <option value="Devanagari">Devanagari</option>
@@ -817,11 +817,11 @@ function TranscribeApp({ onBackToHome }) {
                 </select>
               </div>
 
-              {/* Transcribe Button */}
+              {/* Transcribe Button (CapCut Signature Neon Turquoise Action) */}
               <button
                 onClick={handleStartTranscribe}
                 disabled={!selectedFile || isTranscribing}
-                className="inline-flex items-center gap-1 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-2xs transition-transform active:scale-95 disabled:opacity-40 cursor-pointer whitespace-nowrap"
+                className="inline-flex items-center gap-1.5 px-3 py-1 bg-[#00e5be] hover:bg-[#00c9a7] text-black rounded text-xs font-bold shadow-[0_0_12px_rgba(0,229,190,0.25)] transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
               >
                 {isTranscribing ? (
                   <>
@@ -839,7 +839,7 @@ function TranscribeApp({ onBackToHome }) {
 
             {/* Group 2: Export & Save */}
             <div className="flex flex-wrap items-center gap-1">
-              <span className="text-[10px] uppercase font-bold text-slate-400 hidden sm:inline mr-0.5">Export:</span>
+              <span className="text-[10px] uppercase font-bold text-slate-500 hidden sm:inline mr-0.5">Export:</span>
 
               {[
                 { id: 'csv', label: 'CSV' },
@@ -853,10 +853,10 @@ function TranscribeApp({ onBackToHome }) {
                   <button
                     key={fmt.id}
                     onClick={() => toggleExportFormat(fmt.id)}
-                    className={`px-1.5 py-0.5 rounded text-[11px] font-bold transition-all cursor-pointer ${
+                    className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all cursor-pointer border ${
                       isSelected
-                        ? 'bg-indigo-600 text-white shadow-2xs'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        ? 'bg-[#00e5be]/15 border-[#00e5be]/50 text-[#00e5be]'
+                        : 'bg-[#181920] border-[#262734] text-slate-400 hover:text-slate-200 hover:bg-[#22232c]'
                     }`}
                   >
                     {fmt.label}
@@ -868,7 +868,7 @@ function TranscribeApp({ onBackToHome }) {
               <button
                 onClick={handleMultiExport}
                 disabled={segments.length === 0 || isExporting}
-                className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-2xs transition-transform active:scale-95 disabled:opacity-40 cursor-pointer ml-1 whitespace-nowrap"
+                className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#00e5be] hover:bg-[#00c9a7] text-black rounded text-xs font-bold shadow-[0_0_10px_rgba(0,229,190,0.2)] transition-transform active:scale-95 disabled:opacity-40 cursor-pointer ml-1 whitespace-nowrap"
               >
                 {isExporting ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Package className="w-3 h-3" />}
                 <span>Download ({selectedExportFormats.length})</span>
@@ -879,10 +879,10 @@ function TranscribeApp({ onBackToHome }) {
                 <button
                   onClick={handleSaveToNeonDb}
                   disabled={isSavingToDb}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold shadow-2xs transition-transform active:scale-95 cursor-pointer ml-1 whitespace-nowrap"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#181920] hover:bg-[#22232c] text-slate-200 border border-[#262734] rounded text-xs font-semibold shadow-xs transition-transform active:scale-95 cursor-pointer ml-1 whitespace-nowrap"
                   title="Save current edits to Neon PostgreSQL Cloud DB"
                 >
-                  {isSavingToDb ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                  {isSavingToDb ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3 text-[#00e5be]" />}
                   <span>Save to Neon</span>
                 </button>
               )}
@@ -891,28 +891,28 @@ function TranscribeApp({ onBackToHome }) {
 
           {/* High-Detail Realistic Live Telemetry Progress Bar */}
           {isTranscribing && (
-            <div className="mt-2 pt-2 border-t border-slate-200 space-y-1.5 animate-in fade-in">
+            <div className="mt-2 pt-2 border-t border-[#262734] space-y-1.5 animate-in fade-in">
               <div className="flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
-                  <Loader2 className="w-3.5 h-3.5 text-indigo-600 animate-spin" />
-                  <span className="font-bold text-slate-900">{progressStage}</span>
-                  <span className="text-[11px] text-slate-500 hidden md:inline">— {progressDetail}</span>
+                  <Loader2 className="w-3.5 h-3.5 text-[#00e5be] animate-spin" />
+                  <span className="font-bold text-[#f1f2f6]">{progressStage}</span>
+                  <span className="text-[11px] text-[#7d8190] hidden md:inline">— {progressDetail}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1 font-mono text-[11px] bg-slate-100 px-2 py-0.5 rounded text-slate-600 border border-slate-200">
-                    <Timer className="w-3 h-3 text-indigo-600" />
+                  <span className="inline-flex items-center gap-1 font-mono text-[11px] bg-[#181920] px-2 py-0.5 rounded text-slate-300 border border-[#262734]">
+                    <Timer className="w-3 h-3 text-[#00e5be]" />
                     <span>Elapsed: {elapsedSeconds.toFixed(1)}s</span>
                   </span>
-                  <span className="font-mono font-black text-indigo-600 text-xs bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+                  <span className="font-mono font-bold text-[#00e5be] text-xs bg-[#00e5be]/10 px-2 py-0.5 rounded border border-[#00e5be]/30">
                     {progressPercent.toFixed(0)}%
                   </span>
                 </div>
               </div>
 
               {/* Progress Track */}
-              <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden border border-slate-200 p-0.5 shadow-inner">
+              <div className="w-full h-2 bg-[#181920] rounded-full overflow-hidden border border-[#262734] p-0.5">
                 <div
-                  className="h-full bg-gradient-to-r from-indigo-500 via-indigo-600 to-violet-600 rounded-full transition-all duration-300 ease-out shadow-xs"
+                  className="h-full bg-gradient-to-r from-[#00e5be] via-[#00c9a7] to-[#00b4d8] rounded-full transition-all duration-300 ease-out shadow-[0_0_8px_rgba(0,229,190,0.5)]"
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>
@@ -929,10 +929,10 @@ function TranscribeApp({ onBackToHome }) {
                 ].map((s) => (
                   <div
                     key={s.step}
-                    className={`py-0.5 rounded transition-all truncate px-0.5 ${
+                    className={`py-0.5 rounded transition-all truncate px-0.5 border ${
                       progressStepIndex >= s.step
-                        ? 'bg-indigo-50 text-indigo-700 font-bold border border-indigo-200'
-                        : 'bg-slate-50 text-slate-400 border border-transparent'
+                        ? 'bg-[#00e5be]/15 text-[#00e5be] font-bold border-[#00e5be]/40'
+                        : 'bg-[#181920] text-slate-500 border-[#262734]'
                     }`}
                   >
                     {s.label}
@@ -959,9 +959,9 @@ function TranscribeApp({ onBackToHome }) {
               playTargetTime={playTargetTime}
             />
           ) : (
-            <div className="bg-white border border-dashed border-slate-300 rounded-xl p-3 text-center text-slate-400 shadow-2xs">
+            <div className="bg-[#14151a] border border-dashed border-[#262734] rounded-lg p-3 text-center text-slate-400 shadow-sm">
               <p className="text-xs font-medium">
-                Upload an audio file above to load the interactive waveform and player.
+                Import an audio file above to load the interactive waveform and player.
               </p>
             </div>
           )}
@@ -1061,8 +1061,8 @@ function TranscribeApp({ onBackToHome }) {
 
       {/* Floating Save / Action Toast */}
       {(dbSaveToast || autoSaveStatus) && (
-        <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 bg-slate-900 text-white px-3.5 py-2 rounded-xl shadow-xl border border-slate-700 text-xs font-bold animate-in fade-in slide-in-from-bottom-2">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+        <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 bg-[#181920] text-[#f1f2f6] px-3.5 py-2 rounded-lg shadow-xl border border-[#262734] text-xs font-bold animate-in fade-in slide-in-from-bottom-2">
+          <CheckCircle2 className="w-4 h-4 text-[#00e5be] shrink-0" />
           <span>{dbSaveToast || autoSaveStatus}</span>
         </div>
       )}

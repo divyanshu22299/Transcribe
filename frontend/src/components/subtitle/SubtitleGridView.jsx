@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
-  AlertCircle, CheckCircle2, AlertTriangle, Clock, Trash2, CheckSquare, Square, MinusSquare
+  Trash2, Plus, Sparkles, CheckSquare, Square, MinusSquare,
+  Search, X, Filter, SlidersHorizontal, ArrowUpDown, AlertTriangle
 } from 'lucide-react';
+import SubtitleEventCard from './SubtitleEventCard';
 
 export default function SubtitleGridView({
   events = [],
@@ -9,13 +11,54 @@ export default function SubtitleGridView({
   setActiveEventId = () => {},
   onPlayEvent = () => {},
   onBulkDelete = () => {},
+  onUpdateEvent = () => {},
+  onSplitEvent = () => {},
+  onMergeEvent = () => {},
+  onDeleteEvent = () => {},
+  onRebreakEvent = () => {},
+  onAddSubtitle = () => {},
+  onJumpNextIssue = null,
   cplLimit = 42,
   cpsLimit = 20,
   frameRate = 24.0,
-  theme = 'dark', // 'dark' | 'light'
+  theme = 'dark',
 }) {
   const isDark = theme === 'dark';
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [filterMode, setFilterMode] = useState('all'); // 'all' | 'errors' | 'warnings'
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Filter events based on search and mode
+  const filteredEvents = useMemo(() => {
+    return events.filter(ev => {
+      // Search text match
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const textMatch = (ev.text || '').toLowerCase().includes(q);
+        const idMatch = String(ev.id).includes(q);
+        if (!textMatch && !idMatch) return false;
+      }
+
+      // Filter modes
+      if (filterMode === 'all') return true;
+      
+      const text = ev.text || '';
+      const lines = text.split('\n');
+      const maxCpl = Math.max(...lines.map(l => l.replace(/<[^>]+>/g, '').trim().length), 0);
+      const start = ev.start_time ?? ev.start ?? 0;
+      const end = ev.end_time ?? ev.end ?? 0;
+      const dur = Math.max(0.01, end - start);
+      const cps = text.replace(/<[^>]+>/g, '').trim().length / dur;
+      const isOverCpl = maxCpl > cplLimit;
+      const isOverCps = cps > cpsLimit;
+      const hasErrors = (ev.qc_errors || []).some(e => e.severity === 'error');
+      const hasWarnings = (ev.qc_errors || []).some(e => e.severity === 'warning');
+
+      if (filterMode === 'errors') return isOverCpl || hasErrors || dur < 0.833 || dur > 7.0;
+      if (filterMode === 'warnings') return isOverCps || hasWarnings;
+      return true;
+    });
+  }, [events, searchQuery, filterMode, cplLimit, cpsLimit]);
 
   // Toggle single selection
   const handleToggleSelect = (id, e) => {
@@ -30,12 +73,12 @@ export default function SubtitleGridView({
 
   // Toggle Select All
   const handleToggleSelectAll = useCallback(() => {
-    if (selectedIds.size === events.length && events.length > 0) {
+    if (selectedIds.size === filteredEvents.length && filteredEvents.length > 0) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(events.map(e => e.id ?? e.event_id)));
+      setSelectedIds(new Set(filteredEvents.map(e => e.id ?? e.event_id)));
     }
-  }, [events, selectedIds]);
+  }, [filteredEvents, selectedIds]);
 
   // Bulk Delete Selected
   const handleDeleteSelected = useCallback(() => {
@@ -52,7 +95,7 @@ export default function SubtitleGridView({
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault();
-        setSelectedIds(new Set(events.map(ev => ev.id ?? ev.event_id)));
+        setSelectedIds(new Set(filteredEvents.map(ev => ev.id ?? ev.event_id)));
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.size > 0) {
         e.preventDefault();
         handleDeleteSelected();
@@ -61,227 +104,188 @@ export default function SubtitleGridView({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [events, selectedIds, handleDeleteSelected]);
+  }, [filteredEvents, selectedIds, handleDeleteSelected]);
 
-  const formatSMPTE = (seconds) => {
-    if (isNaN(seconds) || seconds == null) return "00:00:00:00";
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    const f = Math.floor((seconds % 1) * frameRate);
-    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}:${f.toString().padStart(2, '0')}`;
-  };
-
-  const allSelected = events.length > 0 && selectedIds.size === events.length;
-  const someSelected = selectedIds.size > 0 && selectedIds.size < events.length;
+  const allSelected = filteredEvents.length > 0 && selectedIds.size === filteredEvents.length;
+  const someSelected = selectedIds.size > 0 && selectedIds.size < filteredEvents.length;
 
   return (
-    <div className={`rounded-xl border overflow-hidden flex flex-col w-full h-full transition-colors ${
-      isDark ? 'bg-[#121622] border-[#232838]' : 'bg-white border-slate-200 shadow-sm'
-    }`}>
-      {/* Table Header / Bulk Action Bar */}
-      <div className={`px-3 py-1.5 border-b flex items-center justify-between text-xs font-bold shrink-0 transition-colors ${
-        selectedIds.size > 0 
-          ? isDark ? 'bg-indigo-950/80 border-indigo-800 text-indigo-200' : 'bg-indigo-50 border-indigo-200 text-indigo-900'
-          : isDark ? 'bg-[#181e2b] border-[#232838] text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'
-      }`}>
+    <div className="flex flex-col w-full h-full overflow-hidden bg-[#0e0f12] select-none">
+      
+      {/* ── Top Bar: Search, Filters & Stats (CapCut Style) ── */}
+      <div className="px-3 py-2 border-b border-[#262734] flex flex-col gap-2 shrink-0 bg-[#14151a]">
+        
+        {/* Row 1: Search & + Add Button */}
         <div className="flex items-center gap-2">
-          <button 
-            onClick={handleToggleSelectAll}
-            className="flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition-opacity"
-            title="Select All (Ctrl+A)"
-          >
-            {allSelected ? (
-              <CheckSquare size={14} className="text-indigo-500" />
-            ) : someSelected ? (
-              <MinusSquare size={14} className="text-indigo-400" />
-            ) : (
-              <Square size={14} className="opacity-40" />
+          {/* Search Box */}
+          <div className="relative flex-1">
+            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Search dialogue words or #ID..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full pl-8 pr-7 py-1 rounded-lg text-xs bg-[#0e0f12] border border-[#262734] text-white placeholder-slate-500 focus:outline-none focus:border-[#00e5be] focus:ring-1 focus:ring-[#00e5be]/30 transition-all"
+            />
+            {searchQuery && (
+              <button 
+                type="button" 
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+              >
+                <X size={12} />
+              </button>
             )}
-            <span className="uppercase tracking-wider text-[11px] font-mono">
-              {selectedIds.size > 0 ? `${selectedIds.size}/${events.length} SELECTED` : `SUBTITLES (${events.length})`}
-            </span>
-          </button>
+          </div>
+
+          {/* Quick Add Subtitle Button */}
+          {onAddSubtitle && (
+            <button
+              type="button"
+              onClick={onAddSubtitle}
+              className="px-2.5 py-1 rounded-lg text-xs font-bold bg-[#181920] hover:bg-[#00e5be] hover:text-black text-slate-200 border border-[#262734] flex items-center gap-1 transition-all cursor-pointer shadow-xs shrink-0"
+              title="Add new subtitle at current time"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>+ Sub</span>
+            </button>
+          )}
         </div>
 
-        <div className="flex items-center gap-1.5">
-          {selectedIds.size > 0 ? (
-            <>
-              <button
-                onClick={handleDeleteSelected}
-                className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold text-[10px] flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
-                title="Delete all selected subtitles (Delete key)"
-              >
-                <Trash2 size={11} />
-                <span>Delete ({selectedIds.size})</span>
-              </button>
-              <button
-                onClick={() => setSelectedIds(new Set())}
-                className={`px-1.5 py-0.5 rounded text-[10px] font-semibold border transition-colors cursor-pointer ${
-                  isDark ? 'bg-[#1e2436] hover:bg-[#28324a] text-slate-300 border-slate-700' : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
-                }`}
-              >
-                Cancel
-              </button>
-            </>
-          ) : (
-            <span className="text-[10px] opacity-60 font-mono">Ctrl+A to Select All</span>
+        {/* Row 2: Filter Tabs & Count */}
+        <div className="flex items-center justify-between text-xs">
+          {/* Filter Pills */}
+          <div className="flex items-center gap-1 bg-[#0e0f12] p-0.5 rounded-lg border border-[#262734]">
+            <button
+              type="button"
+              onClick={() => setFilterMode('all')}
+              className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all cursor-pointer ${
+                filterMode === 'all' 
+                  ? 'bg-[#181920] text-[#00e5be] shadow-xs' 
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              All ({events.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterMode('errors')}
+              className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all cursor-pointer ${
+                filterMode === 'errors' 
+                  ? 'bg-rose-950/80 text-rose-300 border border-rose-800' 
+                  : 'text-slate-400 hover:text-rose-400'
+              }`}
+            >
+              Errors
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterMode('warnings')}
+              className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all cursor-pointer ${
+                filterMode === 'warnings' 
+                  ? 'bg-amber-950/80 text-amber-300 border border-amber-800' 
+                  : 'text-slate-400 hover:text-amber-400'
+              }`}
+            >
+              Warnings
+            </button>
+          </div>
+
+          {/* Quick Issue jumper (F8 parity) */}
+          {onJumpNextIssue && (
+            <button
+              type="button"
+              onClick={onJumpNextIssue}
+              className="px-2 py-0.5 rounded text-[10px] font-bold border border-amber-700/50 bg-amber-950/40 text-amber-300 hover:bg-amber-900/60 hover:text-amber-100 flex items-center gap-1 cursor-pointer transition-colors shadow-xs"
+              title="Jump to Next QC Issue (F8)"
+            >
+              <AlertTriangle size={10} />
+              <span>Next Issue</span>
+            </button>
           )}
+
+          {/* Bulk Select / Delete Tools */}
+          <div className="flex items-center gap-2">
+            {selectedIds.size > 0 ? (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleDeleteSelected}
+                  className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold text-[10px] flex items-center gap-1 cursor-pointer transition-colors shadow-xs"
+                >
+                  <Trash2 size={11} />
+                  <span>Delete ({selectedIds.size})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedIds(new Set())}
+                  className="px-1.5 py-0.5 rounded text-[10px] font-semibold text-slate-400 hover:text-white border border-[#262734] bg-[#181920] cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleToggleSelectAll}
+                className="text-[10px] text-slate-400 hover:text-slate-200 flex items-center gap-1 cursor-pointer transition-colors"
+                title="Select All (Ctrl+A)"
+              >
+                <CheckSquare size={12} />
+                <span>Select All</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Table Container */}
-      <div className="overflow-x-hidden flex-1 overflow-y-auto custom-scrollbar">
-        <table className={`w-full text-left text-xs border-collapse table-fixed ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-          <thead className={`text-[10px] uppercase font-bold sticky top-0 z-10 border-b ${
-            isDark ? 'bg-[#151a26] text-slate-400 border-[#232838]' : 'bg-slate-100 text-slate-600 border-slate-200'
-          }`}>
-            <tr>
-              <th className="py-1.5 px-1.5 w-7 text-center">
-                <input 
-                  type="checkbox" 
-                  checked={allSelected}
-                  onChange={handleToggleSelectAll}
-                  className="rounded cursor-pointer accent-indigo-600 w-3 h-3"
-                  title="Select All (Ctrl+A)"
-                />
-              </th>
-              <th className="py-1.5 px-1 w-7 text-center font-mono">#</th>
-              <th className="py-1.5 px-2 w-28">Time (In / Out)</th>
-              <th className="py-1.5 px-2 w-20 text-center">Dur / CPS</th>
-              <th className="py-1.5 px-3">Dialogue Text</th>
-            </tr>
-          </thead>
-          <tbody className={`divide-y font-sans ${isDark ? 'divide-[#1e2434]' : 'divide-slate-200'}`}>
-            {events.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="py-12 text-center text-slate-400 text-xs">
-                  No subtitle events in dataset. Click "+ Sub" or "Auto-Generate (AI)".
-                </td>
-              </tr>
-            ) : (
-              events.map((event) => {
-                const id = event.id ?? event.event_id;
-                const isSelected = selectedIds.has(id);
-                const isActive = activeEventId === id;
-                const start = event.start_time !== undefined ? event.start_time : (event.start !== undefined ? event.start : 0);
-                const end = event.end_time !== undefined ? event.end_time : (event.end !== undefined ? event.end : 0);
-                const duration = Math.max(0, end - start);
-                const errors = (event.qc_errors || event.errors || []).filter(err => {
-                  const rid = (err.rule_id || '').toUpperCase();
-                  const msg = (err.message || '').toLowerCase();
-                  return !rid.includes('PYRAMID') && !msg.includes('pyramid') && !msg.includes('bottom-heavy');
-                });
-
-                const text = event.text || '';
-                const lines = text.split('\n');
-                const lineCpl = lines.map(l => l.replace(/<[^>]+>/g, '').trim().length);
-                const maxCpl = Math.max(...lineCpl, 0);
-                const calculatedCps = event.cps ? event.cps : (duration > 0 ? (text.replace(/<[^>]+>/g, '').trim().length / duration) : 0);
-                const isOverCps = calculatedCps > cpsLimit;
-                const isOverCpl = maxCpl > cplLimit;
-
-                const hasCplError = isOverCpl || errors.some(e => (e.rule_id || '').includes('CPL'));
-                const hasHardError = errors.some(e => (e.severity === 'error' || !e.severity) && !(e.rule_id || '').includes('CPS'));
-                const isRed = hasHardError || hasCplError;
-                const isYellow = !isRed && (isOverCps || errors.some(e => (e.rule_id || '').includes('CPS')));
-
-                return (
-                  <tr
-                    key={id}
-                    onClick={() => {
-                      setActiveEventId(id);
-                      onPlayEvent(id);
-                    }}
-                    className={`cursor-pointer transition-colors ${
-                      isSelected
-                        ? isDark ? 'bg-indigo-900/40' : 'bg-indigo-100/60'
-                        : isActive 
-                        ? isDark ? 'bg-indigo-950/70 font-semibold' : 'bg-indigo-50 font-semibold'
-                        : isDark ? 'hover:bg-[#181f2f]' : 'hover:bg-slate-50'
-                    } ${
-                      isRed 
-                        ? isDark ? 'border-l-4 border-l-rose-500 bg-rose-950/20' : 'border-l-4 border-l-rose-600 bg-rose-50/40' 
-                        : isYellow
-                        ? isDark ? 'border-l-4 border-l-amber-500 bg-amber-950/20' : 'border-l-4 border-l-amber-500 bg-amber-50/40'
-                        : isSelected
-                        ? 'border-l-4 border-l-indigo-400'
-                        : isActive
-                        ? 'border-l-4 border-l-indigo-500'
-                        : 'border-l-4 border-l-transparent'
-                    }`}
-                  >
-                    {/* Checkbox Column */}
-                    <td 
-                      className="py-2 px-1.5 text-center"
-                      onClick={(e) => handleToggleSelect(id, e)}
-                    >
-                      <input 
-                        type="checkbox" 
-                        checked={isSelected}
-                        onChange={(e) => handleToggleSelect(id, e)}
-                        className="rounded cursor-pointer accent-indigo-600 w-3 h-3"
-                      />
-                    </td>
-
-                    {/* Index */}
-                    <td className="py-2 px-1 text-center font-mono text-[11px] opacity-75">
-                      #{id}
-                    </td>
-
-                    {/* Stacked Start & End Timecode Column */}
-                    <td className="py-1.5 px-2 font-mono text-[11px] leading-tight">
-                      <div className={`font-bold flex items-center gap-1 ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>
-                        <span className="text-[9px] opacity-60 uppercase font-sans">IN</span>
-                        <span>{formatSMPTE(start)}</span>
-                      </div>
-                      <div className={`text-[10px] flex items-center gap-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                        <span className="text-[9px] opacity-60 uppercase font-sans">OUT</span>
-                        <span>{formatSMPTE(end)}</span>
-                      </div>
-                    </td>
-
-                    {/* Stacked Duration & CPS Column */}
-                    <td className="py-1.5 px-2 text-center font-mono text-[10px] leading-tight">
-                      <div className="font-semibold flex items-center justify-center gap-1">
-                        <span>{duration.toFixed(2)}s</span>
-                        {isOverCpl ? (
-                          <span className="bg-rose-600 text-white text-[8px] font-bold px-1 rounded shadow-xs" title={`CPL violation: ${maxCpl}/${cplLimit}`}>
-                            {maxCpl}L
-                          </span>
-                        ) : hasHardError ? (
-                          <AlertCircle size={10} className="text-rose-500 shrink-0" title={errors[0]?.message} />
-                        ) : isYellow ? (
-                          <AlertTriangle size={10} className="text-amber-500 shrink-0" title={errors[0]?.message} />
-                        ) : (
-                          <CheckCircle2 size={10} className="text-emerald-500 shrink-0" />
-                        )}
-                      </div>
-                      <div className="mt-0.5">
-                        <span className={`px-1 py-0.2 rounded font-bold ${
-                          isOverCps 
-                            ? isDark 
-                              ? 'bg-amber-500/25 text-amber-300 border border-amber-500/60' 
-                              : 'bg-amber-100 text-amber-900 border border-amber-300'
-                            : isDark ? 'bg-[#1c2233] text-slate-300' : 'bg-slate-200 text-slate-700'
-                        }`}>
-                          {calculatedCps.toFixed(1)} CPS
-                        </span>
-                      </div>
-                    </td>
-
-                    {/* Full-Width Dialogue Text Column */}
-                    <td className="py-2 px-3 text-xs">
-                      <div className="font-sans whitespace-pre-wrap line-clamp-2 leading-snug">
-                        {text}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+      {/* ── Subtitle Cards Container (Scrollable) ── */}
+      <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+        {filteredEvents.length === 0 ? (
+          <div className="h-64 flex flex-col items-center justify-center text-center p-6 text-slate-400">
+            <Sparkles className="w-8 h-8 mb-2 opacity-40 animate-pulse text-[#00e5be]" />
+            <p className="text-xs font-bold text-slate-300">No Subtitles in View</p>
+            <p className="text-[11px] opacity-70 mt-1 max-w-[220px]">
+              {searchQuery ? "No matches found for your search." : "Click '+ Sub' or 'Auto Captions (AI)' to generate subtitles."}
+            </p>
+          </div>
+        ) : (
+          filteredEvents.map((event, idx) => (
+            <SubtitleEventCard
+              key={event.id ?? idx}
+              event={event}
+              isActive={activeEventId === event.id}
+              onActivate={setActiveEventId}
+              onUpdate={onUpdateEvent}
+              onPlay={onPlayEvent}
+              onSplit={onSplitEvent}
+              onMerge={onMergeEvent}
+              onDelete={onDeleteEvent}
+              onRebreak={onRebreakEvent}
+              onNavigatePrev={() => {
+                const curIdx = events.findIndex(e => e.id === event.id);
+                if (curIdx > 0) {
+                  const prevId = events[curIdx - 1].id;
+                  setActiveEventId(prevId);
+                  onPlayEvent(prevId);
+                }
+              }}
+              onNavigateNext={() => {
+                const curIdx = events.findIndex(e => e.id === event.id);
+                if (curIdx < events.length - 1) {
+                  const nextId = events[curIdx + 1].id;
+                  setActiveEventId(nextId);
+                  onPlayEvent(nextId);
+                }
+              }}
+              cplLimit={cplLimit}
+              cpsLimit={cpsLimit}
+              frameRate={frameRate}
+              showMerge={idx < filteredEvents.length - 1}
+              theme={theme}
+            />
+          ))
+        )}
       </div>
     </div>
   );

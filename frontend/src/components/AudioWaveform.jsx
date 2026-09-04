@@ -146,24 +146,24 @@ export default function AudioWaveform({
       secondaryLabelInterval: 1,
       style: {
         fontSize: '9px',
-        color: '#64748b',
+        color: '#7d8190',
         fontWeight: '600'
       }
     });
 
     const wsHover = HoverPlugin.create({
-      lineColor: '#ef4444',
+      lineColor: '#00e5be',
       lineWidth: 2,
-      labelBackground: '#0f172a',
-      labelColor: '#ffffff',
+      labelBackground: '#14151a',
+      labelColor: '#00e5be',
       labelSize: '10px'
     });
 
     const ws = WaveSurfer.create({
       container: containerRef.current,
-      waveColor: 'rgba(99, 102, 241, 0.45)',    // Continuous Indigo wavelength
-      progressColor: '#4338ca',                 // Deep Indigo progress fill
-      cursorColor: '#ef4444',                   // Bright Red cursor line
+      waveColor: 'rgba(100, 116, 139, 0.45)',    // Sleek studio slate wave
+      progressColor: '#00e5be',                 // CapCut neon turquoise progress
+      cursorColor: '#00e5ff',                   // Neon cyan playhead cursor
       cursorWidth: 2,
       height: 80,
       normalize: true,
@@ -275,15 +275,15 @@ export default function AudioWaveform({
 
       const getSpeakerColor = (speakerName, isCurrent, hasErrors) => {
         if (hasErrors) return 'rgba(239, 68, 68, 0.35)'; // Red for QC errors
-        if (isCurrent) return 'rgba(245, 158, 11, 0.45)'; // Amber for active
+        if (isCurrent) return 'rgba(0, 229, 190, 0.35)'; // Signature Turquoise for active segment
         
         const palette = [
-          'rgba(99, 102, 241, 0.25)',  // Indigo
-          'rgba(16, 185, 129, 0.25)',  // Emerald
-          'rgba(139, 92, 246, 0.25)',  // Violet
-          'rgba(6, 182, 212, 0.25)',   // Cyan
-          'rgba(236, 72, 153, 0.25)',  // Pink
-          'rgba(249, 115, 22, 0.25)'   // Orange
+          'rgba(0, 229, 190, 0.20)',   // Studio Turquoise
+          'rgba(0, 229, 255, 0.20)',   // Cyan
+          'rgba(168, 85, 247, 0.20)',  // Purple
+          'rgba(236, 72, 153, 0.20)',  // Pink
+          'rgba(245, 158, 11, 0.20)',  // Amber
+          'rgba(16, 185, 129, 0.20)'   // Emerald
         ];
         
         let hash = 0;
@@ -546,21 +546,21 @@ export default function AudioWaveform({
   };
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs transition-all space-y-2.5">
-      {/* 10x Studio Waveform Canvas with Integrated Millisecond Timeline Ruler & Hover Cursor */}
+    <div className="bg-[#14151a] border border-[#262734] rounded-lg p-2.5 shadow-sm transition-all space-y-2">
+      {/* Waveform Canvas with Integrated Millisecond Timeline Ruler & Hover Cursor */}
       <div 
         ref={scrollWrapperRef}
         onWheel={handleWaveformWheel}
-        className="relative bg-slate-950/5 rounded-xl p-2 border border-slate-200/80 overflow-x-auto shadow-inner select-none"
+        className="relative bg-[#0e0f12] rounded-lg p-2 border border-[#262734] overflow-x-auto shadow-inner select-none"
       >
         {/* Live Drag & Edit Tooltip */}
         {draggedRegionInfo && (
-          <div className="absolute top-2 right-3 z-50 bg-slate-900/95 text-white text-[11px] font-mono font-bold px-3 py-1 rounded-lg shadow-xl border border-amber-500/50 flex items-center gap-2 pointer-events-none animate-in fade-in">
-            <span className="text-amber-400 font-black">#{draggedRegionInfo.segId}</span>
-            <span className="text-emerald-300 font-bold">{formatTime(draggedRegionInfo.start)}</span>
-            <span className="text-slate-400">➔</span>
-            <span className="text-rose-300 font-bold">{formatTime(draggedRegionInfo.end)}</span>
-            <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.2 rounded text-[10px]">
+          <div className="absolute top-2 right-3 z-50 bg-[#181920]/95 text-white text-[11px] font-mono font-bold px-3 py-1 rounded-md shadow-xl border border-[#00e5be]/50 flex items-center gap-2 pointer-events-none animate-in fade-in">
+            <span className="text-[#00e5be] font-black">#{draggedRegionInfo.segId}</span>
+            <span className="text-emerald-400 font-bold">{formatTime(draggedRegionInfo.start)}</span>
+            <span className="text-slate-500">➔</span>
+            <span className="text-rose-400 font-bold">{formatTime(draggedRegionInfo.end)}</span>
+            <span className="bg-[#00e5be]/15 text-[#00e5be] border border-[#00e5be]/30 px-1.5 py-0.2 rounded text-[10px]">
               {draggedRegionInfo.duration.toFixed(3)}s
             </span>
           </div>
@@ -569,16 +569,16 @@ export default function AudioWaveform({
         <div ref={containerRef} className="cursor-pointer min-w-full" />
       </div>
 
-      {/* Subtitle Edit 10x Studio Action Bar for Active Segment */}
+      {/* Subtitle Edit Studio Action Bar for Active Segment */}
       {activeSegment && (
-        <div className="bg-slate-50 border border-indigo-100 rounded-lg px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div className="bg-[#181920] border border-[#262734] rounded-md px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs">
           {/* Active Segment Badge & Speaker Info */}
           <div className="flex items-center gap-2 font-mono">
-            <span className="bg-indigo-600 text-white font-bold px-2 py-0.5 rounded text-[11px] shadow-2xs">
+            <span className="bg-[#00e5be] text-black font-bold px-2 py-0.5 rounded text-[11px] shadow-xs">
               Segment #{activeSegment.segment_id}
             </span>
-            <span className="font-bold text-slate-700">{activeSegment.speaker}</span>
-            <span className="text-[11px] text-slate-500 font-semibold">
+            <span className="font-bold text-slate-200">{activeSegment.speaker}</span>
+            <span className="text-[11px] text-slate-400 font-medium">
               ({formatTime(activeSegment.start_time)} - {formatTime(activeSegment.end_time)} | {activeSegment.duration.toFixed(3)}s)
             </span>
           </div>
@@ -589,18 +589,18 @@ export default function AudioWaveform({
             <button
               onClick={handleSetStartToCursor}
               title="Set Start to Current Playhead Cursor (Hotkey: [ )"
-              className="inline-flex items-center gap-1 px-2 py-1 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md text-[11px] font-bold shadow-2xs transition-all active:scale-95 cursor-pointer"
+              className="inline-flex items-center gap-1 px-2 py-1 bg-[#22232c] hover:bg-[#2c2d38] text-slate-200 border border-[#323444] rounded text-[11px] font-semibold shadow-xs transition-all active:scale-95 cursor-pointer"
             >
-              <ArrowLeftToLine className="w-3 h-3 text-indigo-600" />
+              <ArrowLeftToLine className="w-3 h-3 text-[#00e5be]" />
               <span>Set Start [</span>
             </button>
 
             <button
               onClick={handleSetEndToCursor}
               title="Set End to Current Playhead Cursor (Hotkey: ] )"
-              className="inline-flex items-center gap-1 px-2 py-1 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md text-[11px] font-bold shadow-2xs transition-all active:scale-95 cursor-pointer"
+              className="inline-flex items-center gap-1 px-2 py-1 bg-[#22232c] hover:bg-[#2c2d38] text-slate-200 border border-[#323444] rounded text-[11px] font-semibold shadow-xs transition-all active:scale-95 cursor-pointer"
             >
-              <ArrowRightToLine className="w-3 h-3 text-indigo-600" />
+              <ArrowRightToLine className="w-3 h-3 text-[#00e5be]" />
               <span>Set End ]</span>
             </button>
 
@@ -608,9 +608,9 @@ export default function AudioWaveform({
             <button
               onClick={() => onSplitSegmentRef.current && onSplitSegmentRef.current(activeSegment.segment_id, currentTime)}
               title="Split Dialogue at Current Playhead Cursor (Hotkey: S )"
-              className="inline-flex items-center gap-1 px-2 py-1 bg-white hover:bg-amber-50 text-amber-800 border border-amber-300 rounded-md text-[11px] font-bold shadow-2xs transition-all active:scale-95 cursor-pointer"
+              className="inline-flex items-center gap-1 px-2 py-1 bg-[#22232c] hover:bg-[#2c2d38] text-amber-300 border border-amber-500/30 rounded text-[11px] font-semibold shadow-xs transition-all active:scale-95 cursor-pointer"
             >
-              <Scissors className="w-3 h-3 text-amber-600" />
+              <Scissors className="w-3 h-3 text-amber-400" />
               <span>Split (S)</span>
             </button>
 
@@ -618,9 +618,9 @@ export default function AudioWaveform({
             <button
               onClick={() => onMergeSegmentRef.current && onMergeSegmentRef.current(activeSegment.segment_id)}
               title="Merge with Next Dialogue (Hotkey: M )"
-              className="inline-flex items-center gap-1 px-2 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-md text-[11px] font-bold shadow-2xs transition-all active:scale-95 cursor-pointer"
+              className="inline-flex items-center gap-1 px-2 py-1 bg-[#22232c] hover:bg-[#2c2d38] text-slate-200 border border-[#323444] rounded text-[11px] font-semibold shadow-xs transition-all active:scale-95 cursor-pointer"
             >
-              <GitMerge className="w-3 h-3 text-slate-600" />
+              <GitMerge className="w-3 h-3 text-slate-400" />
               <span>Merge (M)</span>
             </button>
 
@@ -629,7 +629,7 @@ export default function AudioWaveform({
               <button
                 onClick={() => onAddSegmentAtTime(currentTime)}
                 title="Add New Blank Segment at Playhead"
-                className="inline-flex items-center gap-1 px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-md text-[11px] font-bold shadow-2xs transition-all active:scale-95 cursor-pointer"
+                className="inline-flex items-center gap-1 px-2 py-1 bg-[#22232c] hover:bg-[#2c2d38] text-[#00e5be] border border-[#00e5be]/30 rounded text-[11px] font-semibold shadow-xs transition-all active:scale-95 cursor-pointer"
               >
                 <Plus className="w-3 h-3" />
                 <span>Add at Cursor</span>
@@ -637,19 +637,19 @@ export default function AudioWaveform({
             )}
 
             {/* Micro Nudges */}
-            <div className="flex items-center bg-white border border-slate-200 rounded-md p-0.5 text-[10px] font-mono">
+            <div className="flex items-center bg-[#22232c] border border-[#323444] rounded p-0.5 text-[10px] font-mono text-slate-300">
               <button 
                 onClick={() => handleNudgeStart(-0.05)} 
                 title="Start -50ms" 
-                className="px-1 hover:bg-slate-100 rounded text-slate-600 cursor-pointer"
+                className="px-1 hover:bg-[#2c2d38] rounded text-slate-400 hover:text-slate-200 cursor-pointer"
               >
                 ◀-50ms
               </button>
-              <span className="text-slate-300">|</span>
+              <span className="text-slate-600">|</span>
               <button 
                 onClick={() => handleNudgeStart(0.05)} 
                 title="Start +50ms" 
-                className="px-1 hover:bg-slate-100 rounded text-slate-600 cursor-pointer"
+                className="px-1 hover:bg-[#2c2d38] rounded text-slate-400 hover:text-slate-200 cursor-pointer"
               >
                 +50ms▶
               </button>
@@ -660,14 +660,14 @@ export default function AudioWaveform({
               <button
                 onClick={handlePrevSegment}
                 title="Jump to Previous Dialogue (Hotkey: A)"
-                className="p-1 text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 rounded-md cursor-pointer"
+                className="p-1 text-slate-300 hover:text-white bg-[#22232c] hover:bg-[#2c2d38] border border-[#323444] rounded cursor-pointer"
               >
                 <ChevronLeft className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={handleNextSegment}
                 title="Jump to Next Dialogue (Hotkey: D)"
-                className="p-1 text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 rounded-md cursor-pointer"
+                className="p-1 text-slate-300 hover:text-white bg-[#22232c] hover:bg-[#2c2d38] border border-[#323444] rounded cursor-pointer"
               >
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
@@ -683,7 +683,7 @@ export default function AudioWaveform({
           <button
             onClick={() => skip(-2)}
             title="Rewind 2s"
-            className="p-1.5 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+            className="p-1.5 text-slate-300 hover:text-white bg-[#181920] hover:bg-[#22232c] border border-[#262734] rounded transition-colors cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
@@ -692,11 +692,11 @@ export default function AudioWaveform({
           <button
             onClick={toggleGlobalPlay}
             title={isPlaying && !isLoopingSegment ? "Pause (Spacebar)" : "Play Entire Audio (Spacebar)"}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-xs transition-transform active:scale-95 cursor-pointer font-bold"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#00e5be] hover:bg-[#00c9a7] text-black rounded font-bold shadow-[0_0_12px_rgba(0,229,190,0.25)] transition-transform active:scale-95 cursor-pointer"
           >
             {isPlaying && !isLoopingSegment ? (
               <>
-                <Pause className="w-3.5 h-3.5" />
+                <Pause className="w-3.5 h-3.5 fill-current" />
                 <span>Pause</span>
               </>
             ) : (
@@ -711,7 +711,7 @@ export default function AudioWaveform({
           <button
             onClick={stopAndReset}
             title="Stop & Reset to Start of Audio 00:00.000 (Escape)"
-            className="flex items-center justify-center p-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg shadow-xs transition-transform active:scale-95 cursor-pointer"
+            className="flex items-center justify-center p-2 bg-[#ff4757] hover:bg-[#ff3848] text-white rounded shadow-xs transition-transform active:scale-95 cursor-pointer"
           >
             <Square className="w-3.5 h-3.5 fill-current" />
           </button>
@@ -719,28 +719,28 @@ export default function AudioWaveform({
           <button
             onClick={() => skip(2)}
             title="Forward 2s"
-            className="p-1.5 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+            className="p-1.5 text-slate-300 hover:text-white bg-[#181920] hover:bg-[#22232c] border border-[#262734] rounded transition-colors cursor-pointer"
           >
             <RotateCw className="w-3.5 h-3.5" />
           </button>
 
           {/* Compact Timecode */}
-          <div className="font-mono text-[11px] text-slate-700 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200 flex items-center gap-1 shadow-2xs">
-            <span className="text-indigo-600 font-bold">{formatTime(currentTime)}</span>
-            <span className="text-slate-400">/</span>
-            <span className="text-slate-600 font-semibold">{formatTime(duration)}</span>
+          <div className="font-mono text-[11px] text-slate-300 bg-[#181920] px-2.5 py-1 rounded border border-[#262734] flex items-center gap-1.5 shadow-xs">
+            <span className="text-[#00e5be] font-bold">{formatTime(currentTime)}</span>
+            <span className="text-slate-600">/</span>
+            <span className="text-slate-400 font-medium">{formatTime(duration)}</span>
           </div>
 
           {/* Segment Loop Active Banner */}
           {activeLoopDisplay && isLoopingSegment && (
-            <div className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-lg text-[11px] font-bold animate-in fade-in">
-              <Repeat className="w-3 h-3 text-amber-600 animate-spin" />
+            <div className="inline-flex items-center gap-1.5 bg-[#1c1917] text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded text-[11px] font-bold animate-in fade-in">
+              <Repeat className="w-3 h-3 text-amber-400 animate-spin" />
               <span>
                 Looping #{activeLoopDisplay.segId || ''} ({formatTime(activeLoopDisplay.start)} - {formatTime(activeLoopDisplay.end)})
               </span>
               <button
                 onClick={clearLoopAndPlayFull}
-                className="hover:text-rose-600 ml-1 p-0.5 bg-amber-100 rounded text-[10px] px-1 font-semibold cursor-pointer"
+                className="hover:text-rose-400 ml-1 p-0.5 bg-amber-950/40 border border-amber-500/30 rounded text-[10px] px-1 font-semibold cursor-pointer"
                 title="Switch to playing entire audio"
               >
                 Exit Loop (Play All)
@@ -750,15 +750,15 @@ export default function AudioWaveform({
         </div>
 
         {/* Center: Playback Speed */}
-        <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[11px]">
+        <div className="flex items-center gap-1 bg-[#181920] p-0.5 rounded border border-[#262734] text-[11px]">
           {[0.8, 1.0, 1.25, 1.5].map((rate) => (
             <button
               key={rate}
               onClick={() => setPlaybackRate(rate)}
               className={`px-2 py-0.5 rounded font-medium transition-all cursor-pointer ${
                 playbackRate === rate
-                  ? 'bg-white text-indigo-700 font-bold shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-[#00e5be] text-black font-bold shadow-xs'
+                  : 'text-slate-400 hover:text-white'
               }`}
             >
               {rate}x
@@ -769,11 +769,11 @@ export default function AudioWaveform({
         {/* Right: Zoom & Volume */}
         <div className="flex items-center gap-2">
           {/* Scroll / Zoom Controls */}
-          <div className="flex items-center gap-1 text-[11px] text-slate-500 bg-slate-100 px-2 py-1 rounded-lg border border-slate-200">
+          <div className="flex items-center gap-1 text-[11px] text-slate-400 bg-[#181920] px-2 py-1 rounded border border-[#262734]">
             <button 
               onClick={() => setZoomLevel(Math.max(10, zoomLevel - 10))}
               title="Zoom Out (Scroll wider)"
-              className="hover:text-slate-900 cursor-pointer"
+              className="hover:text-white cursor-pointer"
             >
               <ZoomOut className="w-3 h-3" />
             </button>
@@ -783,23 +783,23 @@ export default function AudioWaveform({
               max="150"
               value={zoomLevel}
               onChange={(e) => setZoomLevel(Number(e.target.value))}
-              className="w-16 accent-indigo-600 cursor-pointer h-1 bg-slate-200 rounded"
+              className="w-16 accent-[#00e5be] cursor-pointer h-1 bg-[#22232c] rounded"
               title={`Zoom: ${zoomLevel}px/s (Scroll with mouse wheel)`}
             />
             <button 
               onClick={() => setZoomLevel(Math.min(150, zoomLevel + 10))}
               title="Zoom In (Scroll closer)"
-              className="hover:text-slate-900 cursor-pointer"
+              className="hover:text-white cursor-pointer"
             >
               <ZoomIn className="w-3 h-3" />
             </button>
-            <span className="font-mono text-[10px] text-slate-400 pl-0.5">{zoomLevel}x</span>
+            <span className="font-mono text-[10px] text-slate-500 pl-0.5">{zoomLevel}x</span>
           </div>
 
           <button
             onClick={() => setIsMuted(!isMuted)}
             title={isMuted ? 'Unmute' : 'Mute'}
-            className="p-1.5 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+            className="p-1.5 text-slate-300 hover:text-white bg-[#181920] hover:bg-[#22232c] border border-[#262734] rounded transition-colors cursor-pointer"
           >
             {isMuted ? <VolumeX className="w-3.5 h-3.5 text-rose-500" /> : <Volume2 className="w-3.5 h-3.5" />}
           </button>

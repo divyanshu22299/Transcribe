@@ -44,72 +44,72 @@ export default function DiffModal({ isOpen, onClose, originalSegments, currentSe
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
-      <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-3xl p-6 shadow-2xl flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+      <div className="bg-[#14151a] border border-[#262734] rounded-2xl w-full max-w-3xl p-6 shadow-2xl flex flex-col max-h-[90vh] text-slate-200 custom-scrollbar">
         {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+        <div className="flex items-center justify-between pb-4 border-b border-[#262734]">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-2xl">
+            <div className="p-2.5 bg-[#00e5be]/15 text-[#00e5be] border border-[#00e5be]/30 rounded-xl">
               <GitCompare className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-slate-900">Audit Diff View</h2>
-                <span className="text-[11px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full font-mono font-bold">
+                <h2 className="text-base font-bold text-white">Audit Diff View</h2>
+                <span className="text-[11px] bg-[#181920] text-[#00e5be] border border-[#262734] px-2 py-0.5 rounded-full font-mono font-bold">
                   {diffs.length} changed segments
                 </span>
               </div>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-400">
                 Side-by-side comparison of initial AI output vs. current human annotations
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-700 rounded-xl bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer"
+            className="p-2 text-slate-400 hover:text-white rounded-xl bg-[#181920] hover:bg-[#22232c] border border-[#262734] transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Changes List */}
-        <div className="flex-1 overflow-y-auto mt-4 pr-1 space-y-3">
+        <div className="flex-1 overflow-y-auto mt-4 pr-1 space-y-3 custom-scrollbar">
           {diffs.length === 0 ? (
             <div className="py-16 text-center text-slate-400 text-xs">
-              <Check className="w-8 h-8 mx-auto text-emerald-500 mb-2 opacity-60" />
-              <p className="font-bold text-slate-700">No edits recorded yet</p>
+              <Check className="w-8 h-8 mx-auto text-[#00e5be] mb-2 opacity-80" />
+              <p className="font-bold text-slate-200">No edits recorded yet</p>
               <p className="text-slate-400 mt-1">Current segments match the original AI transcription identically.</p>
             </div>
           ) : (
             diffs.map((diff) => (
-              <div key={diff.segment_id} className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+              <div key={diff.segment_id} className="p-3.5 bg-[#181920] border border-[#262734] rounded-xl space-y-2">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold font-mono text-slate-700">Segment #{diff.segment_id}</span>
+                  <span className="font-bold font-mono text-slate-200">Segment #{diff.segment_id}</span>
                   <div className="flex items-center gap-1.5">
-                    {diff.textChanged && <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-700">Text Modified</span>}
-                    {diff.speakerChanged && <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800">Speaker Changed</span>}
-                    {diff.timeChanged && <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800">Timing Adjusted</span>}
+                    {diff.textChanged && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-[#1c1d25] text-[#00e5ff] border border-[#00e5ff]/40">Text Modified</span>}
+                    {diff.speakerChanged && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-500/40">Speaker Changed</span>}
+                    {diff.timeChanged && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-[#00e5be]/20 text-[#00e5be] border border-[#00e5be]/40">Timing Adjusted</span>}
                   </div>
                 </div>
 
                 {diff.orig && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                     {/* Before (Original AI) */}
-                    <div className="p-2.5 bg-rose-50/60 border border-rose-200 rounded-xl">
-                      <div className="flex items-center justify-between text-[10px] font-bold text-rose-700 mb-1">
+                    <div className="p-2.5 bg-rose-950/30 border border-rose-900/50 rounded-xl">
+                      <div className="flex items-center justify-between text-[10px] font-bold text-rose-400 mb-1">
                         <span>ORIGINAL AI</span>
                         <span className="font-mono">{diff.orig.start_time.toFixed(2)}s → {diff.orig.end_time.toFixed(2)}s ({diff.orig.speaker})</span>
                       </div>
-                      <p className="text-slate-800 text-xs leading-relaxed font-sans">{diff.orig.transcript || <span className="italic text-slate-400">(Empty)</span>}</p>
+                      <p className="text-slate-300 text-xs leading-relaxed font-sans">{diff.orig.transcript || <span className="italic text-slate-500">(Empty)</span>}</p>
                     </div>
 
                     {/* After (Current Annotated) */}
-                    <div className="p-2.5 bg-emerald-50/60 border border-emerald-200 rounded-xl">
-                      <div className="flex items-center justify-between text-[10px] font-bold text-emerald-700 mb-1">
+                    <div className="p-2.5 bg-[#00e5be]/10 border border-[#00e5be]/30 rounded-xl">
+                      <div className="flex items-center justify-between text-[10px] font-bold text-[#00e5be] mb-1">
                         <span>CURRENT ANNOTATED</span>
                         <span className="font-mono">{diff.curr.start_time.toFixed(2)}s → {diff.curr.end_time.toFixed(2)}s ({diff.curr.speaker})</span>
                       </div>
-                      <p className="text-slate-900 text-xs leading-relaxed font-sans font-medium">{diff.curr.transcript || <span className="italic text-slate-400">(Empty)</span>}</p>
+                      <p className="text-slate-100 text-xs leading-relaxed font-sans font-medium">{diff.curr.transcript || <span className="italic text-slate-500">(Empty)</span>}</p>
                     </div>
                   </div>
                 )}
@@ -119,10 +119,10 @@ export default function DiffModal({ isOpen, onClose, originalSegments, currentSe
         </div>
 
         {/* Footer */}
-        <div className="mt-4 pt-3 border-t border-slate-100 flex justify-end">
+        <div className="mt-4 pt-3 border-t border-[#262734] flex justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+            className="px-4 py-2 bg-[#00e5be] hover:bg-[#00c9a7] text-black font-bold rounded-xl text-xs transition-all shadow-[0_0_12px_rgba(0,229,190,0.25)] cursor-pointer"
           >
             Close Diff View
           </button>

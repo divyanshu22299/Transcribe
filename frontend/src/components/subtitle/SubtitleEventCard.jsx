@@ -1,54 +1,12 @@
-import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
-  Play, Pause, Trash2, Scissors, Merge, RotateCcw,
-  AlertTriangle, CheckCircle2, ChevronUp, ChevronDown,
-  Italic, Music, Clock, Type, Users, ArrowLeft, ArrowRight,
-  Minus, Plus
+  Play, Trash2, Scissors, Merge,
+  Italic, Clock, Sparkles, CornerDownLeft,
+  Minus, Plus, ChevronUp, ChevronDown, AlertTriangle
 } from 'lucide-react';
 
 /**
- * Renders subtitle text with <i> tag support and \n line breaks.
- */
-function RenderSubtitleText({ text }) {
-  if (!text) return null;
-  const lines = text.split('\n');
-  return (
-    <div className="space-y-0.5">
-      {lines.map((line, idx) => {
-        const parts = [];
-        let remaining = line;
-        let key = 0;
-        while (remaining.length > 0) {
-          const iStart = remaining.indexOf('<i>');
-          if (iStart === -1) {
-            parts.push(<span key={key++}>{remaining}</span>);
-            break;
-          }
-          if (iStart > 0) {
-            parts.push(<span key={key++}>{remaining.slice(0, iStart)}</span>);
-          }
-          const iEnd = remaining.indexOf('</i>', iStart);
-          if (iEnd === -1) {
-            parts.push(<em key={key++} className="text-indigo-300">{remaining.slice(iStart + 3)}</em>);
-            break;
-          }
-          parts.push(<em key={key++} className="text-indigo-300">{remaining.slice(iStart + 3, iEnd)}</em>);
-          remaining = remaining.slice(iEnd + 4);
-        }
-        const isDualSpeaker = line.trim().startsWith('-');
-        return (
-          <div key={idx} className={isDualSpeaker ? 'pl-0' : ''}>
-            {isDualSpeaker && <span className="text-emerald-500 font-bold mr-1">-</span>}
-            {parts.length > 0 ? parts : <span>{line}</span>}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/**
- * Format seconds to HH:MM:SS.mmm
+ * Format seconds to SMPTE timecode (HH:MM:SS.mmm)
  */
 function formatTime(secs) {
   if (secs == null || isNaN(secs)) return '00:00:00.000';
@@ -61,41 +19,48 @@ function formatTime(secs) {
 
 export default function SubtitleEventCard({
   event,
-  isActive,
-  onActivate,
-  onUpdate,
-  onPlay,
-  onStop,
-  onSplit,
-  onMerge,
-  onDelete,
-  onRebreak,
-  contentType = 'adult',
-  frameRate = 24,
+  isActive = false,
+  onActivate = () => {},
+  onUpdate = () => {},
+  onPlay = () => {},
+  onSplit = () => {},
+  onMerge = () => {},
+  onDelete = () => {},
+  onRebreak = () => {},
+  onNavigatePrev = () => {},
+  onNavigateNext = () => {},
+  cplLimit = 42,
+  cpsLimit = 20,
+  frameRate = 24.0,
   showMerge = true,
+  theme = 'dark'
 }) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [editText, setEditText] = useState(event.text || '');
+  const isDark = theme === 'dark';
+  const [localText, setLocalText] = useState(event.text || '');
   const textareaRef = useRef(null);
-  const nudgeStep = 1 / frameRate; // 1 frame
+  const cardRef = useRef(null);
+  const nudgeStep = 1 / frameRate; // 1 frame (~0.042s)
 
-  // Sync editText when event changes externally
+  // Auto-scroll active card into view
   useEffect(() => {
-    if (!isEditing) {
-      setEditText(event.text || '');
+    if (isActive && cardRef.current) {
+      cardRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
-  }, [event.text, isEditing]);
+  }, [isActive]);
 
-  const cpsLimit = contentType === 'children' ? 17 : 20;
-  const cplLimit = 42;
+  // Sync localText with incoming event updates
+  useEffect(() => {
+    setLocalText(event.text || '');
+  }, [event.text]);
 
-  // Calculate metrics
+  const start = event.start_time !== undefined ? event.start_time : (event.start !== undefined ? event.start : 0);
+  const end = event.end_time !== undefined ? event.end_time : (event.end !== undefined ? event.end : 0);
+  const duration = Math.max(0.01, end - start);
+
+  // Compute live character metrics
   const metrics = useMemo(() => {
-    const text = event.text || '';
-    const duration = (event.end_time || 0) - (event.start_time || 0);
+    const text = localText || '';
     const lines = text.split('\n');
-    
-    // CPS calculation (strip tags, music notes, speaker hyphens)
     let clean = text.replace(/<[^>]+>/g, '').replace(/♪/g, '').trim();
     const cleanLines = clean.split('\n').map(l => {
       let s = l.trim();
@@ -106,302 +71,391 @@ export default function SubtitleEventCard({
     const charCount = clean.length;
     const cps = duration > 0 ? charCount / duration : 0;
 
-    // CPL per line
-    const cpl = lines.map(l => {
+    const lineCpl = lines.map(l => {
       let c = l.replace(/<[^>]+>/g, '').trim();
       if (c.startsWith('-')) c = c.slice(1).trim();
       return c.length;
     });
 
-    const maxCpl = Math.max(...cpl, 0);
+    const maxCpl = Math.max(...lineCpl, 0);
     const lineCount = lines.length;
 
-    return { cps: Math.round(cps * 10) / 10, cpl, maxCpl, lineCount, charCount, duration: Math.round(duration * 1000) / 1000 };
-  }, [event.text, event.start_time, event.end_time]);
+    return {
+      cps: Math.round(cps * 10) / 10,
+      lineCpl,
+      maxCpl,
+      lineCount,
+      charCount,
+      duration: Math.round(duration * 100) / 100
+    };
+  }, [localText, duration]);
 
-  // CPS color
-  const cpsColor = metrics.cps > cpsLimit ? 'text-red-600 bg-red-50 border-red-200' :
-    metrics.cps > cpsLimit - 2 ? 'text-amber-600 bg-amber-50 border-amber-200' :
-    'text-emerald-600 bg-emerald-50 border-emerald-200';
+  const isOverCpl = metrics.maxCpl > cplLimit;
+  const isOverCps = metrics.cps > cpsLimit;
+  const isTooManyLines = metrics.lineCount > 2;
+  const isShortDuration = duration < 0.833;
+  const isLongDuration = duration > 7.0;
 
-  // Error/warning counts
-  const qcErrors = event.qc_errors || [];
-  const errorCount = qcErrors.filter(e => e.severity === 'error').length;
-  const warningCount = qcErrors.filter(e => e.severity === 'warning').length;
-  const hasIssues = errorCount > 0 || warningCount > 0;
+  // Filter out any cosmetic pyramid errors for Netflix compliance
+  const qcErrors = useMemo(() => {
+    return (event.qc_errors || event.errors || []).filter(err => {
+      const rid = (err.rule_id || '').toUpperCase();
+      const msg = (err.message || '').toLowerCase();
+      return !rid.includes('PYRAMID') && !msg.includes('pyramid') && !msg.includes('bottom-heavy');
+    });
+  }, [event.qc_errors, event.errors]);
 
-  // Card border color
-  const borderColor = !event.is_valid ? 'border-red-300 bg-red-50/30' :
-    isActive ? 'border-indigo-400 bg-indigo-50/30' :
-    'border-slate-200 bg-white';
-
-  const handleTextChange = useCallback((e) => {
+  // Handle immediate text typing
+  const handleTextChange = (e) => {
     const newText = e.target.value;
-    setEditText(newText);
-  }, []);
+    setLocalText(newText);
+    onUpdate(event.id, 'text', newText);
+  };
 
-  const handleTextBlur = useCallback(() => {
-    setIsEditing(false);
-    if (editText !== event.text) {
-      onUpdate(event.id, 'text', editText);
-    }
-  }, [editText, event.id, event.text, onUpdate]);
-
-  const handleTextFocus = useCallback(() => {
-    setIsEditing(true);
-  }, []);
-
-  const handleTimeNudge = useCallback((field, delta) => {
-    const currentVal = field === 'start_time' ? event.start_time : event.end_time;
+  // Nudge timing
+  const handleTimeNudge = (field, delta) => {
+    const currentVal = field === 'start_time' ? start : end;
     const newVal = Math.max(0, Math.round((currentVal + delta) * 1000) / 1000);
+    if (field === 'start_time' && newVal >= end - 0.1) return;
+    if (field === 'end_time' && newVal <= start + 0.1) return;
     onUpdate(event.id, field, newVal);
-  }, [event.id, event.start_time, event.end_time, onUpdate]);
+  };
 
-  const handleKeyDown = useCallback((e) => {
-    if (e.key === 'Tab' && !e.shiftKey) {
-      e.preventDefault();
-      // Auto-break lines on Tab
-      if (onRebreak) onRebreak(event.id);
+  // Toggle italics
+  const toggleItalics = () => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const selStart = textarea.selectionStart;
+    const selEnd = textarea.selectionEnd;
+    const val = localText;
+
+    let updated = val;
+    if (selStart !== selEnd) {
+      const selected = val.substring(selStart, selEnd);
+      if (selected.startsWith('<i>') && selected.endsWith('</i>')) {
+        updated = val.substring(0, selStart) + selected.slice(3, -4) + val.substring(selEnd);
+      } else {
+        updated = val.substring(0, selStart) + `<i>${selected}</i>` + val.substring(selEnd);
+      }
+    } else {
+      if (val.includes('<i>') && val.includes('</i>')) {
+        updated = val.replace(/<\/?i>/g, '');
+      } else {
+        updated = `<i>${val}</i>`;
+      }
     }
-    if (e.key === 'Enter' && e.ctrlKey) {
+    setLocalText(updated);
+    onUpdate(event.id, 'text', updated);
+  };
+
+  // Keydown handler (Ctrl+I for Italics)
+  const handleTextareaKeyDown = (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
       e.preventDefault();
-      handleTextBlur();
+      toggleItalics();
     }
-  }, [event.id, onRebreak, handleTextBlur]);
+  };
 
   return (
     <div
-      className={`rounded-xl border-2 transition-all duration-200 ${borderColor} ${isActive ? 'shadow-lg ring-2 ring-indigo-200' : 'shadow-sm hover:shadow-md'}`}
+      ref={cardRef}
       onClick={() => onActivate(event.id)}
+      className={`group relative rounded-xl border transition-all duration-150 p-2.5 flex flex-col gap-2 cursor-pointer ${
+        isActive 
+          ? 'bg-[#181920] border-[#00e5be] shadow-[0_0_15px_rgba(0,229,190,0.15)] ring-1 ring-[#00e5be]/50' 
+          : 'bg-[#14151a] border-[#262734] hover:border-[#383a4c] hover:bg-[#181920]'
+      }`}
     >
-      {/* Header Row */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100">
-        <div className="flex items-center gap-3">
-          {/* Event ID Badge */}
-          <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-slate-800 text-white text-xs font-bold">
-            {event.id}
-          </span>
+      {/* Active Left Indicator Bar */}
+      {isActive && (
+        <div className="absolute left-0 top-3 bottom-3 w-1 bg-[#00e5be] rounded-r" />
+      )}
 
-          {/* Play Button */}
+      {/* Top Header Row: ID, Timecode Controls, Duration, QC Badges */}
+      <div className="flex items-center justify-between gap-1.5 flex-wrap">
+        
+        {/* Left: ID + Timecode In/Out + Play */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {/* Badge ID & Jumpers */}
+          <div className="flex items-center gap-0.5">
+            <span className={`px-2 py-0.5 rounded font-mono text-[11px] font-black ${
+              isActive ? 'bg-[#00e5be] text-black shadow-xs' : 'bg-[#181920] border border-[#262734] text-slate-300'
+            }`}>
+              #{event.id}
+            </span>
+            {isActive && (
+              <div className="flex items-center gap-0.5 ml-0.5">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onNavigatePrev();
+                  }}
+                  className="p-0.5 rounded border border-[#262734] bg-[#0e0f12] text-slate-400 hover:text-white hover:border-[#00e5be] cursor-pointer transition-colors"
+                  title="Previous Subtitle (Up Arrow)"
+                >
+                  <ChevronUp size={11} />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onNavigateNext();
+                  }}
+                  className="p-0.5 rounded border border-[#262734] bg-[#0e0f12] text-slate-400 hover:text-white hover:border-[#00e5be] cursor-pointer transition-colors"
+                  title="Next Subtitle (Down Arrow)"
+                >
+                  <ChevronDown size={11} />
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Play / Seek Button */}
           <button
-            onClick={(e) => { e.stopPropagation(); onPlay(event.id); }}
-            className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors"
-            title="Play this subtitle"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPlay(event.id);
+            }}
+            className="p-1 rounded bg-[#181920] border border-[#262734] hover:bg-[#00e5be] hover:text-black text-slate-400 transition-colors cursor-pointer"
+            title="Preview subtitle in player"
           >
-            <Play className="w-4 h-4" />
+            <Play className="w-3 h-3 fill-current" />
           </button>
 
-          {/* Timing Controls */}
-          <div className="flex items-center gap-1.5">
-            <div className="flex items-center gap-0.5">
-              <button onClick={(e) => { e.stopPropagation(); handleTimeNudge('start_time', -nudgeStep); }} className="p-0.5 rounded hover:bg-slate-100" title="Start -1 frame">
-                <Minus className="w-3 h-3 text-slate-400" />
-              </button>
-              <input
-                type="text"
-                value={formatTime(event.start_time)}
-                readOnly
-                className="w-24 text-xs font-mono text-center bg-slate-50 border border-slate-200 rounded px-1 py-0.5"
-                title="Start time"
-              />
-              <button onClick={(e) => { e.stopPropagation(); handleTimeNudge('start_time', nudgeStep); }} className="p-0.5 rounded hover:bg-slate-100" title="Start +1 frame">
-                <Plus className="w-3 h-3 text-slate-400" />
-              </button>
-            </div>
-
-            <span className="text-slate-300 text-xs">→</span>
-
-            <div className="flex items-center gap-0.5">
-              <button onClick={(e) => { e.stopPropagation(); handleTimeNudge('end_time', -nudgeStep); }} className="p-0.5 rounded hover:bg-slate-100" title="End -1 frame">
-                <Minus className="w-3 h-3 text-slate-400" />
-              </button>
-              <input
-                type="text"
-                value={formatTime(event.end_time)}
-                readOnly
-                className="w-24 text-xs font-mono text-center bg-slate-50 border border-slate-200 rounded px-1 py-0.5"
-                title="End time"
-              />
-              <button onClick={(e) => { e.stopPropagation(); handleTimeNudge('end_time', nudgeStep); }} className="p-0.5 rounded hover:bg-slate-100" title="End +1 frame">
-                <Plus className="w-3 h-3 text-slate-400" />
-              </button>
-            </div>
+          {/* Start Timecode with Frame Nudge */}
+          <div className="flex items-center bg-[#0e0f12] border border-[#262734] rounded px-1 py-0.5 text-[10px] font-mono text-[#00e5be]">
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handleTimeNudge('start_time', -nudgeStep); }}
+              className="p-0.5 hover:text-white transition-colors cursor-pointer"
+              title="-1 frame"
+            >
+              <Minus className="w-2.5 h-2.5" />
+            </button>
+            <span className="px-1">{formatTime(start)}</span>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handleTimeNudge('start_time', nudgeStep); }}
+              className="p-0.5 hover:text-white transition-colors cursor-pointer"
+              title="+1 frame"
+            >
+              <Plus className="w-2.5 h-2.5" />
+            </button>
           </div>
 
-          {/* Duration Badge */}
-          <span className={`text-xs font-mono px-2 py-0.5 rounded-full border ${
-            metrics.duration < 0.833 ? 'text-red-600 bg-red-50 border-red-200' :
-            metrics.duration > 7.0 ? 'text-red-600 bg-red-50 border-red-200' :
-            'text-slate-500 bg-slate-50 border-slate-200'
-          }`}>
-            <Clock className="w-3 h-3 inline mr-0.5" />
-            {metrics.duration.toFixed(2)}s
+          <span className="text-slate-500 text-[10px]">→</span>
+
+          {/* End Timecode with Frame Nudge */}
+          <div className="flex items-center bg-[#0e0f12] border border-[#262734] rounded px-1 py-0.5 text-[10px] font-mono text-[#00e5be]">
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handleTimeNudge('end_time', -nudgeStep); }}
+              className="p-0.5 hover:text-white transition-colors cursor-pointer"
+              title="-1 frame"
+            >
+              <Minus className="w-2.5 h-2.5" />
+            </button>
+            <span className="px-1">{formatTime(end)}</span>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handleTimeNudge('end_time', nudgeStep); }}
+              className="p-0.5 hover:text-white transition-colors cursor-pointer"
+              title="+1 frame"
+            >
+              <Plus className="w-2.5 h-2.5" />
+            </button>
+          </div>
+
+          {/* Duration Pill */}
+          <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+            isShortDuration || isLongDuration 
+              ? 'bg-rose-950/60 border-rose-800 text-rose-300' 
+              : 'bg-[#0e0f12] border-[#262734] text-slate-300'
+          }`} title={isShortDuration ? "Duration below 0.833s" : isLongDuration ? "Duration exceeds 7.0s" : "Duration"}>
+            {duration.toFixed(2)}s
           </span>
         </div>
 
-        {/* Right: Metrics + Actions */}
-        <div className="flex items-center gap-2">
-          {/* CPS Badge */}
-          <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${cpsColor}`}>
-            CPS {metrics.cps}
+        {/* Right: QC Metrics & Action Tools */}
+        <div className="flex items-center gap-1.5">
+          {/* CPL Pill */}
+          <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${
+            isOverCpl 
+              ? 'bg-rose-950/80 border-rose-700 text-rose-300 animate-pulse' 
+              : 'bg-[#0e0f12] border-[#262734] text-slate-400'
+          }`} title={`Max Characters Per Line: ${metrics.maxCpl}/${cplLimit}`}>
+            {metrics.maxCpl} CPL
           </span>
 
-          {/* Line Count */}
-          <span className={`text-xs px-1.5 py-0.5 rounded border ${
-            metrics.lineCount > 2 ? 'text-red-600 bg-red-50 border-red-200' : 'text-slate-500 bg-slate-50 border-slate-200'
-          }`}>
-            {metrics.lineCount}L
+          {/* CPS Pill */}
+          <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${
+            isOverCps 
+              ? 'bg-rose-950/80 border-rose-700 text-rose-300' 
+              : metrics.cps > cpsLimit - 2.5 
+              ? 'bg-amber-950/80 border-amber-700 text-amber-300' 
+              : 'bg-[#0e0f12] border-[#262734] text-[#00e5be]'
+          }`} title={`Reading Speed: ${metrics.cps} Characters Per Second (Limit: ${cpsLimit})`}>
+            {metrics.cps} CPS
           </span>
 
-          {/* Speaker count */}
-          {(event.speaker_count || 1) > 1 && (
-            <span className="text-xs px-1.5 py-0.5 rounded bg-violet-50 text-violet-600 border border-violet-200">
-              <Users className="w-3 h-3 inline mr-0.5" />2
-            </span>
-          )}
-
-          {/* Italic indicator */}
-          {event.is_italic && (
-            <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-200">
-              <Italic className="w-3 h-3 inline" />
-            </span>
-          )}
-
-          {/* Error/Warning badges */}
-          {errorCount > 0 && (
-            <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-medium">
-              {errorCount} ⛔
-            </span>
-          )}
-          {warningCount > 0 && (
-            <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">
-              {warningCount} ⚠️
-            </span>
-          )}
-
-          {/* Action Buttons */}
-          <div className="flex items-center gap-0.5 ml-2 border-l border-slate-200 pl-2">
-            {onRebreak && (
-              <button
-                onClick={(e) => { e.stopPropagation(); onRebreak(event.id); }}
-                className="p-1.5 rounded-lg hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 transition-colors"
-                title="Auto-break lines (Tab)"
-              >
-                <Type className="w-3.5 h-3.5" />
-              </button>
-            )}
+          {/* Action Buttons Toolbar */}
+          <div className="flex items-center gap-0.5 pl-1 border-l border-[#262734]">
+            {/* Auto Rebreak Lines */}
             <button
-              onClick={(e) => { e.stopPropagation(); onSplit(event.id); }}
-              className="p-1.5 rounded-lg hover:bg-amber-50 text-slate-400 hover:text-amber-600 transition-colors"
-              title="Split event"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRebreak(event.id);
+              }}
+              className="p-1 rounded text-slate-400 hover:text-[#00e5be] hover:bg-[#181920] transition-colors cursor-pointer"
+              title="Auto-balance lines (Netflix syntax rules)"
             >
-              <Scissors className="w-3.5 h-3.5" />
+              <CornerDownLeft className="w-3 h-3" />
             </button>
+
+            {/* Split Subtitle */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSplit(event.id);
+              }}
+              className="p-1 rounded text-slate-400 hover:text-amber-400 hover:bg-[#181920] transition-colors cursor-pointer"
+              title="Split subtitle into two events"
+            >
+              <Scissors className="w-3 h-3" />
+            </button>
+
+            {/* Merge with Next */}
             {showMerge && (
               <button
-                onClick={(e) => { e.stopPropagation(); onMerge(event.id); }}
-                className="p-1.5 rounded-lg hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-colors"
-                title="Merge with next"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMerge(event.id);
+                }}
+                className="p-1 rounded text-slate-400 hover:text-cyan-400 hover:bg-[#181920] transition-colors cursor-pointer"
+                title="Merge with next subtitle"
               >
-                <Merge className="w-3.5 h-3.5" />
+                <Merge className="w-3 h-3" />
               </button>
             )}
+
+            {/* Italic */}
             <button
-              onClick={(e) => { e.stopPropagation(); onDelete(event.id); }}
-              className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
-              title="Delete event"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleItalics();
+              }}
+              className={`p-1 rounded text-slate-400 hover:text-white hover:bg-[#181920] transition-colors cursor-pointer ${
+                localText.includes('<i>') ? 'text-[#00e5be] bg-[#00e5be]/10' : ''
+              }`}
+              title="Toggle italics (<i>...</i>)"
             >
-              <Trash2 className="w-3.5 h-3.5" />
+              <Italic className="w-3 h-3" />
+            </button>
+
+            {/* Delete */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(event.id);
+              }}
+              className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 transition-colors cursor-pointer"
+              title="Delete subtitle"
+            >
+              <Trash2 className="w-3 h-3" />
             </button>
           </div>
         </div>
       </div>
 
-      {/* Body: Text Editor + CPL Sidebar */}
-      <div className="flex">
-        {/* Text Area */}
-        <div className="flex-1 p-3">
-          {isEditing ? (
-            <textarea
-              ref={textareaRef}
-              value={editText}
-              onChange={handleTextChange}
-              onBlur={handleTextBlur}
-              onKeyDown={handleKeyDown}
-              className="w-full min-h-[56px] p-2 rounded-lg border border-indigo-300 bg-white text-sm font-mono resize-none focus:outline-none focus:ring-2 focus:ring-indigo-300"
-              spellCheck={false}
-              autoFocus
-              rows={Math.max(2, (editText.match(/\n/g) || []).length + 1)}
-            />
-          ) : (
-            <div
-              onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
-              className="min-h-[56px] p-2 rounded-lg border border-transparent hover:border-slate-200 hover:bg-slate-50 cursor-text text-sm transition-colors"
+      {/* Inline Direct Editable Textarea */}
+      <div className="relative">
+        <textarea
+          ref={textareaRef}
+          value={localText}
+          onChange={handleTextChange}
+          onKeyDown={handleTextareaKeyDown}
+          onFocus={() => onActivate(event.id)}
+          placeholder="Enter dialogue text (Ctrl+I for italics)..."
+          rows={Math.max(2, metrics.lineCount)}
+          className={`w-full bg-[#0e0f12] border rounded-lg px-2.5 py-1.5 text-[13px] font-sans leading-relaxed resize-none focus:outline-none transition-all ${
+            isActive 
+              ? 'border-[#00e5be]/60 text-white focus:border-[#00e5be] focus:ring-1 focus:ring-[#00e5be]/30' 
+              : 'border-[#262734] text-slate-200 hover:border-[#383a4c]'
+          }`}
+        />
+        
+        {/* Line metrics footer */}
+        <div className="flex items-center justify-between text-[10px] text-slate-400 px-1 pt-0.5">
+          <div className="flex items-center gap-2">
+            {metrics.lineCpl.map((len, idx) => (
+              <span key={idx} className={len > cplLimit ? 'text-rose-400 font-bold' : ''}>
+                Line {idx + 1}: {len}/{cplLimit}
+              </span>
+            ))}
+          </div>
+
+          {/* Quick Auto-Fix Pill if violation */}
+          {(isOverCpl || isOverCps || isTooManyLines || qcErrors.length > 0) && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRebreak(event.id);
+              }}
+              className="flex items-center gap-1 text-[10px] font-bold text-amber-400 hover:text-amber-300 bg-amber-950/60 border border-amber-700/60 rounded px-1.5 py-0.2 cursor-pointer transition-colors"
             >
-              <RenderSubtitleText text={event.text} />
-            </div>
+              <Sparkles className="w-2.5 h-2.5" />
+              <span>Auto-Fix</span>
+            </button>
           )}
         </div>
 
-        {/* CPL Sidebar */}
-        <div className="w-16 border-l border-slate-100 flex flex-col items-center justify-center gap-1 p-2">
-          <span className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider">CPL</span>
-          {metrics.cpl.map((count, idx) => (
-            <span
-              key={idx}
-              className={`text-xs font-mono font-bold px-1.5 py-0.5 rounded ${
-                count > cplLimit ? 'text-red-600 bg-red-50' :
-                count > cplLimit - 5 ? 'text-amber-600 bg-amber-50' :
-                'text-slate-500 bg-slate-50'
-              }`}
-            >
-              {count}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      {/* QC Errors (collapsed by default, expand when active) */}
-      {hasIssues && isActive && (
-        <div className="px-4 pb-3 space-y-1">
-          <div className="border-t border-slate-100 pt-2">
-            {qcErrors.map((err, idx) => (
-              <div
-                key={idx}
-                className={`flex items-start gap-2 text-xs py-1 ${
-                  err.severity === 'error' ? 'text-red-700' : 'text-amber-700'
-                }`}
+        {/* Detailed QC Audit Flags Breakdown (Full Inspector parity) */}
+        {isActive && qcErrors.length > 0 && (
+          <div className="mt-2 p-2 rounded-lg bg-rose-950/40 border border-rose-800/60 text-rose-300 space-y-1">
+            <div className="flex items-center justify-between text-[11px] font-bold">
+              <span className="flex items-center gap-1 text-rose-300">
+                <AlertTriangle size={12} className="text-rose-400" />
+                <span>Netflix QC Violations ({qcErrors.length}):</span>
+              </span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRebreak(event.id);
+                }}
+                className="flex items-center gap-1 text-[10px] font-bold text-amber-300 hover:text-white bg-amber-950/80 border border-amber-600/50 rounded px-1.5 py-0.5 cursor-pointer transition-colors"
               >
-                {err.severity === 'error' ?
-                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-red-500" /> :
-                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-500" />
-                }
-                <div>
-                  <span className="font-mono text-[10px] px-1 py-0.5 rounded bg-slate-100 text-slate-500 mr-1.5">
-                    {err.rule_id}
-                  </span>
-                  <span>{err.message}</span>
-                  {err.suggested_fix && (
-                    <div className="mt-0.5 text-emerald-600 text-[11px]">
-                      💡 Suggested: {typeof err.suggested_fix === 'string' ? err.suggested_fix.slice(0, 80) : 'Auto-fix available'}
-                    </div>
-                  )}
+                <Sparkles size={10} />
+                <span>Auto-Fix</span>
+              </button>
+            </div>
+            <div className="space-y-0.5 max-h-24 overflow-y-auto custom-scrollbar">
+              {qcErrors.map((err, idx) => (
+                <div key={idx} className="text-[10px] leading-tight text-rose-200">
+                  • <span className="font-mono text-rose-400 font-semibold">{err.rule_id || 'QC'}:</span> {err.message}
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Compact error indicator when not active */}
-      {hasIssues && !isActive && (
-        <div className="px-4 pb-2">
-          <div className="text-xs text-slate-400">
-            {errorCount > 0 && <span className="text-red-500 mr-2">⛔ {errorCount} error{errorCount > 1 ? 's' : ''}</span>}
-            {warningCount > 0 && <span className="text-amber-500">⚠️ {warningCount} warning{warningCount > 1 ? 's' : ''}</span>}
+        {/* Non-active warning summary */}
+        {!isActive && qcErrors.length > 0 && (
+          <div className="flex items-center gap-1 text-[10px] text-rose-400 font-medium px-1 mt-1 truncate">
+            <AlertTriangle size={11} className="shrink-0 text-rose-400" />
+            <span className="truncate">{qcErrors[0].message}</span>
+            {qcErrors.length > 1 && <span className="text-slate-500 shrink-0">+{qcErrors.length - 1} more</span>}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

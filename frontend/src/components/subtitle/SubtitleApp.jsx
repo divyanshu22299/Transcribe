@@ -9,7 +9,6 @@ import {
 import { API_BASE } from '../../config';
 import VideoPlayer from './VideoPlayer';
 import AudioWaveformTimeline from './AudioWaveformTimeline';
-import SubtitleInspector from './SubtitleInspector';
 import SubtitleGridView from './SubtitleGridView';
 import NetflixQCPanel from './NetflixQCPanel';
 import SubtitleExportModal from './SubtitleExportModal';
@@ -17,30 +16,23 @@ import SubtitleDiffModal from './SubtitleDiffModal';
 import SubtitleSettingsModal from './SubtitleSettingsModal';
 
 export default function SubtitleApp({ onBackToHome }) {
-  // ── Theme State: Dark / Light Mode ──
-  const [theme, setTheme] = useState(() => {
-    try {
-      return localStorage.getItem('subtitle_theme') || 'dark';
-    } catch {
-      return 'dark';
-    }
-  });
-
-  const isDark = theme === 'dark';
-
-  const toggleTheme = () => {
-    const next = theme === 'dark' ? 'light' : 'dark';
-    setTheme(next);
-    try {
-      localStorage.setItem('subtitle_theme', next);
-    } catch {}
-  };
+  // ── Theme State: Unified Dark Creative Suite ──
+  const [theme] = useState('dark');
+  const isDark = true;
 
   // Video & File state
   const [selectedFile, setSelectedFile] = useState(null);
   const [videoUrl, setVideoUrl] = useState(null);
   const [videoDuration, setVideoDuration] = useState(0);
   const [currentVideoId, setCurrentVideoId] = useState(null);
+
+  const isAudioFile = useMemo(() => {
+    if (!selectedFile) return false;
+    return Boolean(
+      selectedFile.type?.startsWith('audio/') || 
+      /\.(mp3|wav|m4a|aac|flac|ogg|opus|wma)$/i.test(selectedFile.name || '')
+    );
+  }, [selectedFile]);
 
   // Subtitle Dataset State
   const [events, setEvents] = useState([]);
@@ -82,8 +74,6 @@ export default function SubtitleApp({ onBackToHome }) {
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
   const [showFileDropdown, setShowFileDropdown] = useState(false);
   const [autoSaveStatus, setAutoSaveStatus] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterMode, setFilterMode] = useState('all'); // 'all' | 'errors'
   const [pendingDraft, setPendingDraft] = useState(null); // Previous autosaved draft detection
   const [backendConnected, setBackendConnected] = useState(null); // null = checking, true = online, false = offline
 
@@ -101,15 +91,12 @@ export default function SubtitleApp({ onBackToHome }) {
     return () => { isMounted = false; };
   }, []);
 
-  // Resizable Layout Dimensions (Default: Left 440px, Bottom 210px, Video 55%)
-  const [leftPanelWidth, setLeftPanelWidth] = useState(440);
+  // Resizable Layout Dimensions (Default: Left 480px, Bottom 210px)
+  const [leftPanelWidth, setLeftPanelWidth] = useState(480);
   const [bottomTimelineHeight, setBottomTimelineHeight] = useState(210);
-  const [videoPanePercent, setVideoPanePercent] = useState(55);
 
   const isResizingLeftRef = useRef(false);
   const isResizingBottomRef = useRef(false);
-  const isResizingVideoRef = useRef(false);
-  const rightContainerRef = useRef(null);
 
   // File Inputs
   const fileInputRef = useRef(null);
@@ -209,19 +196,6 @@ export default function SubtitleApp({ onBackToHome }) {
     }));
   }, []);
 
-  // Filtered Subtitle Events (with pyramid purged)
-  const filteredEvents = useMemo(() => {
-    const cleanList = sanitizeEvents(events);
-    return cleanList.filter(e => {
-      const txt = (e.text || '').toLowerCase();
-      const matchesSearch = searchQuery ? txt.includes(searchQuery.toLowerCase()) : true;
-      const errors = e.qc_errors || e.errors || [];
-      const hasErrors = errors.length > 0;
-      const matchesFilter = filterMode === 'errors' ? hasErrors : true;
-      return matchesSearch && matchesFilter;
-    });
-  }, [events, searchQuery, filterMode, sanitizeEvents]);
-
   // Click outside to close menus
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -270,12 +244,6 @@ export default function SubtitleApp({ onBackToHome }) {
     document.body.style.cursor = 'row-resize';
   };
 
-  const handleVideoSplitterDown = (e) => {
-    e.preventDefault();
-    isResizingVideoRef.current = true;
-    document.body.style.cursor = 'col-resize';
-  };
-
   useEffect(() => {
     const handleMouseMove = (e) => {
       if (isResizingLeftRef.current) {
@@ -285,19 +253,13 @@ export default function SubtitleApp({ onBackToHome }) {
         const windowHeight = window.innerHeight;
         const newHeight = Math.max(140, Math.min(420, windowHeight - e.clientY - 12));
         setBottomTimelineHeight(newHeight);
-      } else if (isResizingVideoRef.current && rightContainerRef.current) {
-        const rect = rightContainerRef.current.getBoundingClientRect();
-        const offsetX = e.clientX - rect.left;
-        const percent = Math.max(35, Math.min(75, (offsetX / rect.width) * 100));
-        setVideoPanePercent(percent);
       }
     };
 
     const handleMouseUp = () => {
-      if (isResizingLeftRef.current || isResizingBottomRef.current || isResizingVideoRef.current) {
+      if (isResizingLeftRef.current || isResizingBottomRef.current) {
         isResizingLeftRef.current = false;
         isResizingBottomRef.current = false;
-        isResizingVideoRef.current = false;
         document.body.style.cursor = 'default';
       }
     };
@@ -498,7 +460,7 @@ export default function SubtitleApp({ onBackToHome }) {
     }
   };
 
-  // Video File Upload Handler
+  // Media File (Video or Audio) Upload Handler
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -507,10 +469,15 @@ export default function SubtitleApp({ onBackToHome }) {
       const url = URL.createObjectURL(file);
       setVideoUrl(url);
 
-      const vid = document.createElement('video');
-      vid.src = url;
-      vid.onloadedmetadata = () => {
-        setVideoDuration(vid.duration || 0);
+      const isAudio = Boolean(
+        file.type?.startsWith('audio/') || 
+        /\.(mp3|wav|m4a|aac|flac|ogg|opus|wma)$/i.test(file.name || '')
+      );
+
+      const mediaElem = isAudio ? document.createElement('audio') : document.createElement('video');
+      mediaElem.src = url;
+      mediaElem.onloadedmetadata = () => {
+        setVideoDuration(mediaElem.duration || 0);
       };
 
       // Upload in background immediately so backend pre-extracts audio and serves true waveform peaks
@@ -1073,15 +1040,13 @@ export default function SubtitleApp({ onBackToHome }) {
   };
 
   return (
-    <div className={`h-screen w-screen overflow-hidden flex flex-col font-sans select-none transition-colors duration-150 ${
-      isDark ? 'bg-[#090b10] text-slate-100' : 'bg-slate-100 text-slate-900'
-    }`}>
+    <div className="h-screen w-screen overflow-hidden flex flex-col font-sans select-none transition-colors duration-150 bg-[#0e0f12] text-[#f1f2f6]">
       {/* Hidden File Upload Inputs */}
       <input 
         type="file" 
         ref={fileInputRef} 
         onChange={handleFileChange} 
-        accept="video/mp4,video/mkv,video/quicktime,video/webm,video/avi" 
+        accept="video/mp4,video/mkv,video/quicktime,video/webm,video/avi,audio/mp3,audio/wav,audio/m4a,audio/aac,audio/flac,audio/ogg,audio/mpeg,audio/opus,.mp4,.mkv,.mov,.webm,.avi,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus" 
         className="hidden" 
       />
       <input 
@@ -1092,49 +1057,48 @@ export default function SubtitleApp({ onBackToHome }) {
         className="hidden" 
       />
 
-      {/* ── Top Header Bar ── */}
-      <nav ref={headerMenuRef} className={`border-b px-3.5 py-1.5 flex items-center justify-between shadow-xs shrink-0 z-40 transition-colors ${
-        isDark ? 'bg-[#121622] border-[#212738]' : 'bg-white border-slate-200'
-      }`}>
+      {/* ── Top Header Bar (Sleek NLE Studio Menu) ── */}
+      <nav ref={headerMenuRef} className="border-b border-[#262734] bg-[#121318] px-3 py-1 flex items-center justify-between shadow-xs shrink-0 z-40 transition-colors">
         {/* Left: Brand & Studio Title */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2">
           <button 
             onClick={onBackToHome} 
-            className={`p-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-bold border ${
-              isDark ? 'hover:bg-[#1c2233] text-slate-400 hover:text-white border-[#262e44]' : 'hover:bg-slate-100 text-slate-600 hover:text-slate-900 border-slate-200'
-            }`}
+            className="p-1 px-2 rounded transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-semibold border border-[#262734] hover:bg-[#181920] text-slate-300 hover:text-white"
             title="Return to Hub"
           >
-            <ArrowLeft className="w-3.5 h-3.5" />
+            <ArrowLeft className="w-3.5 h-3.5 text-[#00e5be]" />
             <span>Hub</span>
           </button>
           
-          <div className={`h-4 w-px ${isDark ? 'bg-[#262e44]' : 'bg-slate-200'}`} />
+          <div className="h-4 w-px bg-[#262734]" />
 
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-red-600 via-rose-600 to-amber-500 text-white flex items-center justify-center shadow-xs">
-              <Film className="w-3.5 h-3.5" />
+            <div className="w-5 h-5 rounded bg-gradient-to-tr from-[#00e5be] to-[#00b4d8] text-black flex items-center justify-center font-black shadow-xs">
+              <Film className="w-3 h-3" />
             </div>
             <div className="flex items-center gap-1.5">
-              <h1 className={`text-xs font-black tracking-tight uppercase font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              <h1 className="text-xs font-bold tracking-tight uppercase font-mono text-white">
                 SUBTITLE STUDIO
               </h1>
-              <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.2 bg-red-950 text-red-400 rounded border border-red-800/60">
+              <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.2 bg-[#00e5be]/15 text-[#00e5be] rounded border border-[#00e5be]/40">
                 PRO
               </span>
             </div>
           </div>
 
           {selectedFile && (
-            <span className={`text-[10px] font-mono px-2 py-0.5 rounded border truncate max-w-[140px] ${
-              isDark ? 'text-slate-400 bg-[#181e2b] border-[#232838]' : 'text-slate-600 bg-slate-50 border-slate-200'
-            }`} title={selectedFile.name}>
-              {selectedFile.name}
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-[#262734] truncate max-w-[220px] text-slate-300 bg-[#181920] flex items-center gap-1.5" title={selectedFile.name}>
+              <span className={`px-1 py-0.2 rounded text-[9px] font-bold ${
+                isAudioFile ? 'bg-cyan-500/20 text-[#00e5ff] border border-cyan-500/40' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+              }`}>
+                {isAudioFile ? '🎵 AUDIO' : '🎬 VIDEO'}
+              </span>
+              <span className="truncate">{selectedFile.name}</span>
             </span>
           )}
 
           {autoSaveStatus && (
-            <span className="text-[10px] text-emerald-500 font-mono font-bold animate-pulse">
+            <span className="text-[10px] text-[#00e5be] font-mono font-bold animate-pulse">
               {autoSaveStatus}
             </span>
           )}
@@ -1142,13 +1106,11 @@ export default function SubtitleApp({ onBackToHome }) {
 
         {/* Center / Non-Blocking Streaming Indicator Banner */}
         {isGenerating ? (
-          <div className={`flex items-center gap-2 px-3 py-1 rounded-full border shadow-sm ${
-            isDark ? 'bg-indigo-950/80 border-indigo-500 text-indigo-200' : 'bg-indigo-50 border-indigo-400 text-indigo-800'
-          }`}>
-            <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-500" />
+          <div className="flex items-center gap-2 px-3 py-1 rounded-full border border-[#00e5be]/50 bg-[#181920] text-[#00e5be] shadow-sm">
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-[#00e5be]" />
             <span className="text-[11px] font-bold">{progressStage}</span>
             {batchProgress && (
-              <span className="text-[10px] font-mono font-black px-1.5 py-0.2 bg-indigo-600 text-white rounded">
+              <span className="text-[10px] font-mono font-black px-1.5 py-0.2 bg-[#00e5be] text-black rounded">
                 Batch {batchProgress.current}/{batchProgress.total}
               </span>
             )}
@@ -1161,47 +1123,37 @@ export default function SubtitleApp({ onBackToHome }) {
             <div className="relative">
               <button 
                 onClick={() => { setShowFileDropdown(!showFileDropdown); setShowSettingsDropdown(false); }}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer border ${
-                  isDark ? 'hover:bg-[#1c2233] text-slate-300 border-[#262e44]' : 'hover:bg-slate-100 text-slate-700 border-slate-200'
-                }`}
+                className="px-2 py-1 rounded text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer border border-[#262734] hover:bg-[#181920] text-slate-300 hover:text-white"
               >
                 <span>File</span>
                 <ChevronDown size={12} />
               </button>
 
               {showFileDropdown && (
-                <div className={`absolute top-full left-0 mt-1 w-52 rounded-xl shadow-xl border p-1 z-50 animate-in fade-in zoom-in-95 duration-150 ${
-                  isDark ? 'bg-[#141824] border-[#2a344a] text-slate-200' : 'bg-white border-slate-200 text-slate-800'
-                }`}>
+                <div className="absolute top-full left-0 mt-1 w-56 rounded-lg shadow-xl border border-[#262734] p-1 z-50 animate-in fade-in zoom-in-95 duration-150 bg-[#181920] text-slate-200">
                   <button 
                     onClick={() => { fileInputRef.current?.click(); setShowFileDropdown(false); }}
-                    className={`w-full text-left px-3 py-2 text-xs rounded-lg flex items-center gap-2 cursor-pointer ${
-                      isDark ? 'hover:bg-[#1c2233] text-slate-200' : 'hover:bg-slate-100 text-slate-800'
-                    }`}
+                    className="w-full text-left px-3 py-2 text-xs rounded flex items-center gap-2 cursor-pointer hover:bg-[#22232c] text-slate-200"
                   >
-                    <Upload size={13} className="text-indigo-400" />
-                    <span>Open Video File...</span>
+                    <Upload size={13} className="text-[#00e5be]" />
+                    <span>Open Media (Video / Audio)...</span>
                   </button>
                   <button 
                     onClick={() => { srtImportRef.current?.click(); setShowFileDropdown(false); }}
-                    className={`w-full text-left px-3 py-2 text-xs rounded-lg flex items-center gap-2 cursor-pointer ${
-                      isDark ? 'hover:bg-[#1c2233] text-slate-200' : 'hover:bg-slate-100 text-slate-800'
-                    }`}
+                    className="w-full text-left px-3 py-2 text-xs rounded flex items-center gap-2 cursor-pointer hover:bg-[#22232c] text-slate-200"
                   >
                     <FileText size={13} className="text-emerald-400" />
                     <span>Import Subtitle (SRT/VTT)...</span>
                   </button>
-                  <div className={`h-px my-1 ${isDark ? 'bg-[#232a3d]' : 'bg-slate-200'}`} />
+                  <div className="h-px my-1 bg-[#262734]" />
                   <button 
                     onClick={() => { setShowExportModal(true); setShowFileDropdown(false); }}
-                    className={`w-full text-left px-3 py-2 text-xs rounded-lg flex items-center gap-2 font-bold cursor-pointer ${
-                      isDark ? 'hover:bg-[#1c2233] text-indigo-300' : 'hover:bg-slate-100 text-indigo-600'
-                    }`}
+                    className="w-full text-left px-3 py-2 text-xs rounded flex items-center gap-2 font-bold cursor-pointer hover:bg-[#22232c] text-[#00e5be]"
                   >
                     <Download size={13} />
                     <span>Export Subtitles...</span>
                   </button>
-                  <div className={`h-px my-1 ${isDark ? 'bg-[#232a3d]' : 'bg-slate-200'}`} />
+                  <div className="h-px my-1 bg-[#262734]" />
                   <button 
                     onClick={() => {
                       if (window.confirm("Clear all current subtitles and remove any saved draft for this video?")) {
@@ -1219,7 +1171,7 @@ export default function SubtitleApp({ onBackToHome }) {
                       }
                       setShowFileDropdown(false);
                     }}
-                    className={`w-full text-left px-3 py-2 text-xs rounded-lg flex items-center gap-2 font-medium cursor-pointer text-rose-400 hover:bg-rose-950/40`}
+                    className={`w-full text-left px-3 py-2 text-xs rounded flex items-center gap-2 font-medium cursor-pointer text-rose-400 hover:bg-rose-950/40`}
                   >
                     <Trash2 size={13} />
                     <span>Clear Subtitles & Draft</span>
@@ -1231,28 +1183,22 @@ export default function SubtitleApp({ onBackToHome }) {
             {/* Settings Modal Trigger Button */}
             <button 
               onClick={() => setShowSettingsModal(true)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border ${
-                isDark ? 'hover:bg-[#1c2233] text-slate-300 border-[#262e44]' : 'hover:bg-slate-100 text-slate-700 border-slate-200'
-              }`}
+              className="px-2 py-1 rounded text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border hover:bg-[#181920] text-slate-300 border-[#262734]"
               title="Configure CPL, CPS, Line Limits & AI Auto-Fix"
             >
-              <Settings size={13} className="text-indigo-400" />
+              <Settings size={13} className="text-[#00e5be]" />
               <span>Settings</span>
-              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[#00e5be]/15 text-[#00e5be] border border-[#00e5be]/30">
                 {cplLimit} CPL · {cpsLimit} CPS
               </span>
             </button>
 
             {/* Undo / Redo */}
-            <div className={`flex items-center border rounded-lg overflow-hidden ${
-              isDark ? 'border-[#262e44] bg-[#141824]' : 'border-slate-200 bg-slate-50'
-            }`}>
+            <div className="flex items-center border border-[#262734] bg-[#14151a] rounded overflow-hidden">
               <button 
                 onClick={handleUndo} 
                 disabled={historyIndex <= 0}
-                className={`p-1.5 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
-                  isDark ? 'hover:bg-[#1f2638] text-slate-300' : 'hover:bg-slate-200 text-slate-700'
-                }`}
+                className="p-1.5 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[#1f2638] text-slate-300 hover:text-white"
                 title="Undo (Ctrl+Z)"
               >
                 <Undo2 size={13} />
@@ -1260,9 +1206,7 @@ export default function SubtitleApp({ onBackToHome }) {
               <button 
                 onClick={handleRedo} 
                 disabled={historyIndex >= history.length - 1}
-                className={`p-1.5 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed border-l ${
-                  isDark ? 'border-[#262e44] hover:bg-[#1f2638] text-slate-300' : 'border-slate-200 hover:bg-slate-200 text-slate-700'
-                }`}
+                className="p-1.5 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed border-l border-[#262734] hover:bg-[#1f2638] text-slate-300 hover:text-white"
                 title="Redo (Ctrl+Y)"
               >
                 <Redo2 size={13} />
@@ -1271,32 +1215,16 @@ export default function SubtitleApp({ onBackToHome }) {
           </div>
         )}
 
-        {/* Right Menu Strip */}
-        <div className="flex items-center gap-2">
-          {/* Theme Toggle Button */}
-          <button
-            onClick={toggleTheme}
-            className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 border transition-colors cursor-pointer ${
-              isDark ? 'bg-[#181e2b] hover:bg-[#202738] text-amber-300 border-[#283247]' : 'bg-slate-100 hover:bg-slate-200 text-indigo-700 border-slate-300'
-            }`}
-            title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-          >
-            {isDark ? <Sun size={13} /> : <Moon size={13} />}
-            <span>{isDark ? 'Light' : 'Dark'}</span>
-          </button>
-
+        {/* Right Menu Strip (CapCut Aesthetic) */}
+        <div className="flex items-center gap-1.5">
           {/* Auto-Fix Button */}
           <button 
             onClick={handleAutoFix}
             disabled={isGenerating || events.length === 0}
-            className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer border shadow-xs disabled:opacity-40 disabled:cursor-not-allowed ${
-              isDark 
-                ? 'bg-teal-950/80 hover:bg-teal-900 border-teal-700/60 text-teal-300' 
-                : 'bg-teal-50 hover:bg-teal-100 border-teal-300 text-teal-800'
-            }`}
+            className="px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border border-emerald-500/40 bg-[#181920] hover:bg-[#22232c] text-emerald-400 shadow-xs disabled:opacity-40 disabled:cursor-not-allowed"
             title="Auto-Fix Netflix Compliance Rules"
           >
-            <Sparkles className="w-3.5 h-3.5 text-teal-500" />
+            <Sparkles className="w-3 h-3 text-emerald-400" />
             <span>Auto-Fix</span>
           </button>
 
@@ -1304,27 +1232,27 @@ export default function SubtitleApp({ onBackToHome }) {
           <button 
             onClick={handleGenerate}
             disabled={isGenerating}
-            className="px-3.5 py-1 rounded-lg text-xs font-bold bg-gradient-to-r from-indigo-600 via-indigo-500 to-teal-500 hover:brightness-110 text-white flex items-center gap-1.5 transition-all shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-3 py-1 rounded text-xs font-semibold bg-[#22232c] hover:bg-[#2c2d38] border border-[#00e5be]/50 text-[#00e5be] flex items-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             title="Run Gemini AI Netflix Subtitle Pipeline"
           >
             {isGenerating ? (
               <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-[#00e5be]" />
                 <span>Generating...</span>
               </>
             ) : (
               <>
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Auto-Generate (AI)</span>
+                <Sparkles className="w-3.5 h-3.5 text-[#00e5be]" />
+                <span>Auto-Generate</span>
               </>
             )}
           </button>
 
-          {/* Export Button */}
+          {/* Export Button (CapCut Signature Neon Turquoise Action) */}
           <button 
             onClick={() => setShowExportModal(true)}
             disabled={events.length === 0}
-            className="px-3 py-1 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-3.5 py-1 rounded text-xs font-bold bg-[#00e5be] hover:bg-[#00c9a7] text-black flex items-center gap-1.5 transition-all shadow-[0_0_12px_rgba(0,229,190,0.25)] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             title="Export TTML / SRT / VTT"
           >
             <FileDown className="w-3.5 h-3.5" />
@@ -1334,19 +1262,19 @@ export default function SubtitleApp({ onBackToHome }) {
           {/* Netflix QC Score Capsule */}
           <button 
             onClick={() => setShowQcDrawer(!showQcDrawer)}
-            className={`px-3 py-1 rounded-lg text-xs font-mono font-bold flex items-center gap-1.5 transition-colors cursor-pointer border ${
+            className={`px-2.5 py-1 rounded text-xs font-mono font-bold flex items-center gap-1.5 transition-colors cursor-pointer border ${
               complianceScore >= 98 
-                ? 'bg-emerald-950/80 border-emerald-700 text-emerald-300' 
+                ? 'bg-[#181920] border-emerald-500/50 text-emerald-400' 
                 : complianceScore >= 80 
-                ? 'bg-amber-950/80 border-amber-700 text-amber-300' 
-                : 'bg-rose-950/80 border-rose-700 text-rose-300'
+                ? 'bg-[#181920] border-amber-500/50 text-amber-400' 
+                : 'bg-[#181920] border-rose-500/50 text-rose-400'
             }`}
             title="Open Netflix Quality Control Dashboard"
           >
             <ShieldCheck className="w-3.5 h-3.5" />
             <span>QC: {complianceScore}%</span>
             {totalErrors > 0 && (
-              <span className="px-1.5 py-0.2 bg-rose-600 text-white rounded-full text-[9px] font-black">
+              <span className="px-1.5 py-0.2 bg-rose-500 text-white rounded-full text-[9px] font-black">
                 {totalErrors}
               </span>
             )}
@@ -1354,11 +1282,9 @@ export default function SubtitleApp({ onBackToHome }) {
         </div>
       </nav>
 
-      {/* Backend Connection Warning Banner (Shown if API server is offline / not reachable on live site) */}
+      {/* Backend Connection Warning Banner */}
       {backendConnected === false && (
-        <div className={`px-4 py-2.5 flex items-center justify-between border-b text-xs shrink-0 z-30 transition-all ${
-          isDark ? 'bg-amber-950/80 border-amber-800 text-amber-200' : 'bg-amber-50 border-amber-300 text-amber-900'
-        }`}>
+        <div className="px-4 py-2 flex items-center justify-between border-b border-amber-800 bg-amber-950/80 text-amber-200 text-xs shrink-0 z-30 transition-all">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
             <span>
@@ -1367,7 +1293,7 @@ export default function SubtitleApp({ onBackToHome }) {
           </div>
           <button
             onClick={() => setShowSettingsModal(true)}
-            className="px-3 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold shrink-0 transition-colors cursor-pointer"
+            className="px-3 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded text-xs font-bold shrink-0 transition-colors cursor-pointer"
           >
             Configure API URL
           </button>
@@ -1376,11 +1302,9 @@ export default function SubtitleApp({ onBackToHome }) {
 
       {/* Draft Restore Notification Banner */}
       {pendingDraft && (
-        <div className={`px-4 py-2 flex items-center justify-between border-b text-xs shrink-0 z-30 transition-all ${
-          isDark ? 'bg-indigo-950/80 border-indigo-800 text-indigo-200' : 'bg-indigo-50 border-indigo-200 text-indigo-900'
-        }`}>
+        <div className="px-4 py-2 flex items-center justify-between border-b border-[#262734] bg-[#181920] text-slate-200 text-xs shrink-0 z-30 transition-all">
           <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-indigo-400 shrink-0" />
+            <Sparkles className="w-4 h-4 text-[#00e5be] shrink-0" />
             <span>
               Found an earlier saved draft for <strong>{selectedFile?.name}</strong> with {pendingDraft.events?.length || 0} subtitles ({pendingDraft.timestamp ? new Date(pendingDraft.timestamp).toLocaleTimeString() : 'autosaved'}).
             </span>
@@ -1395,7 +1319,7 @@ export default function SubtitleApp({ onBackToHome }) {
                 setActiveEventId(pendingDraft.events?.[0]?.id || null);
                 setPendingDraft(null);
               }}
-              className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded font-bold cursor-pointer transition-colors shadow-xs"
+              className="px-3 py-1 bg-[#00e5be] hover:bg-[#00c9a7] text-black rounded font-bold cursor-pointer transition-colors shadow-xs"
             >
               Restore Draft
             </button>
@@ -1406,9 +1330,7 @@ export default function SubtitleApp({ onBackToHome }) {
                 } catch (_) {}
                 setPendingDraft(null);
               }}
-              className={`px-3 py-1 rounded cursor-pointer transition-colors ${
-                isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'
-              }`}
+              className="px-3 py-1 rounded cursor-pointer transition-colors bg-[#22232c] hover:bg-[#2c2d38] text-slate-300"
             >
               Discard & Start Fresh
             </button>
@@ -1418,16 +1340,16 @@ export default function SubtitleApp({ onBackToHome }) {
 
       {/* Slim Real-Time Progress Line during Streaming */}
       {isGenerating && (
-        <div className="w-full h-1 bg-slate-800 overflow-hidden shrink-0">
+        <div className="w-full h-1 bg-[#181920] overflow-hidden shrink-0">
           <div 
-            className="h-full bg-gradient-to-r from-indigo-500 via-teal-400 to-emerald-400 transition-all duration-300"
+            className="h-full bg-gradient-to-r from-[#00e5be] via-[#00c9a7] to-[#00b4d8] shadow-[0_0_8px_rgba(0,229,190,0.5)] transition-all duration-300"
             style={{ width: `${progressPercent}%` }}
           />
         </div>
       )}
 
       {/* ── Resizable Subtitle Studio Workstation ── */}
-      <div className="flex-1 min-h-0 flex flex-col p-2 gap-1.5 w-full mx-auto overflow-hidden relative select-none">
+      <div className="flex-1 min-h-0 flex flex-col p-1.5 gap-1.5 w-full mx-auto overflow-hidden relative select-none">
         
         {/* Top Resizable Split Area (Left: Subtitle Sheet vs Right: Video + Inspector) */}
         <div className="flex-1 min-h-0 flex gap-0 overflow-hidden">
@@ -1435,153 +1357,60 @@ export default function SubtitleApp({ onBackToHome }) {
           {/* Left Panel: Subtitle List / Spreadsheet View (Resizable Width) */}
           <div 
             style={{ width: `${leftPanelWidth}px` }} 
-            className={`shrink-0 flex flex-col h-full overflow-hidden rounded-xl border shadow-sm transition-colors ${
-              isDark ? 'bg-[#121622] border-[#232838]' : 'bg-white border-slate-200'
-            }`}
+            className="shrink-0 flex flex-col h-full overflow-hidden rounded-lg border border-[#262734] bg-[#14151a] shadow-sm transition-colors"
           >
-            {/* Search & Filter Header */}
-            <div className={`p-2 border-b flex items-center justify-between gap-2 shrink-0 ${
-              isDark ? 'bg-[#161c29] border-[#232838]' : 'bg-slate-50 border-slate-200'
-            }`}>
-              <div className="flex items-center gap-2 flex-1">
-                <div className="relative flex-1">
-                  <Search className="w-3.5 h-3.5 opacity-40 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    placeholder="Search dialogue..."
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                    className={`pl-8 pr-2 py-1 rounded-lg text-xs w-full border focus:outline-none focus:ring-2 focus:ring-indigo-400 ${
-                      isDark ? 'bg-[#0d1017] border-[#283045] text-slate-100' : 'bg-white border-slate-300 text-slate-900'
-                    }`}
-                  />
-                  {searchQuery && (
-                    <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 opacity-50 hover:opacity-100">
-                      <X size={12} />
-                    </button>
-                  )}
-                </div>
-
-                {/* Filter toggle: All vs Issues Only */}
-                <button
-                  onClick={() => setFilterMode(filterMode === 'all' ? 'errors' : 'all')}
-                  className={`px-2 py-1 rounded-lg text-xs font-bold border transition-colors cursor-pointer flex items-center gap-1 ${
-                    filterMode === 'errors' 
-                      ? 'bg-rose-600 border-rose-500 text-white' 
-                      : isDark ? 'bg-[#1d2436] hover:bg-[#252f45] text-slate-400 border-[#2e374f]' : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
-                  }`}
-                  title="Filter lines with Netflix QC errors"
-                >
-                  <AlertCircle size={12} />
-                  <span>Issues {totalErrors > 0 && `(${totalErrors})`}</span>
-                </button>
-              </div>
-
-              {/* Add Subtitle Button */}
-              <button
-                onClick={() => handleAddSubtitle(currentTime)}
-                className="p-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors cursor-pointer shrink-0"
-                title="Add new subtitle at playhead"
-              >
-                <Plus size={14} />
-              </button>
-            </div>
-
-            {/* Subtitle Spreadsheet Table View */}
-            <div className="flex-1 overflow-hidden p-1.5">
-              <SubtitleGridView 
-                events={filteredEvents}
-                activeEventId={activeEventId}
-                setActiveEventId={setActiveEventId}
-                onPlayEvent={handlePlayEvent}
-                onUpdateEvent={handleUpdateEvent}
-                onDeleteEvent={handleDeleteEvent}
-                onBulkDelete={handleBulkDelete}
-                onSplitEvent={handleSplitEvent}
-                onMergeEvent={handleMergeEvents}
-                cplLimit={cplLimit}
-                cpsLimit={cpsLimit}
-                frameRate={frameRate}
-                theme={theme}
-              />
-            </div>
+            <SubtitleGridView 
+              events={events}
+              activeEventId={activeEventId}
+              setActiveEventId={setActiveEventId}
+              onPlayEvent={handlePlayEvent}
+              onUpdateEvent={handleUpdateEvent}
+              onDeleteEvent={handleDeleteEvent}
+              onBulkDelete={handleBulkDelete}
+              onSplitEvent={handleSplitEvent}
+              onMergeEvent={handleMergeEvents}
+              onRebreakEvent={handleRebreakEvent}
+              onAddSubtitle={() => handleAddSubtitle(currentTime)}
+              onJumpNextIssue={jumpToNextIssue}
+              cplLimit={cplLimit}
+              cpsLimit={cpsLimit}
+              frameRate={frameRate}
+              theme={theme}
+            />
           </div>
 
-          {/* ── Vertical Resizer Splitter (Left vs Right) ── */}
+          {/* ── Vertical Resizer Splitter (Left Subtitles vs Right Video) ── */}
           <div 
             onMouseDown={handleLeftSplitterDown}
-            className="w-2 hover:w-2.5 hover:bg-indigo-500/50 cursor-col-resize flex items-center justify-center transition-all group z-30 shrink-0"
+            className="w-2 hover:w-2.5 hover:bg-[#00e5be]/40 cursor-col-resize flex items-center justify-center transition-all group z-30 shrink-0"
             title="Drag to resize Subtitle Sheet width"
           >
-            <div className="w-1 h-12 bg-[#2d374d] rounded-full group-hover:bg-indigo-400 transition-colors" />
+            <div className="w-0.5 h-10 bg-[#262734] rounded-full group-hover:bg-[#00e5be] transition-colors" />
           </div>
 
-          {/* Right Panel: Video Player & Subtitle Inspector */}
-          <div 
-            ref={rightContainerRef}
-            className="flex-1 flex min-w-0 h-full overflow-hidden"
-          >
-            {/* Video Player (Resizable Percentage) */}
-            <div 
-              style={{ width: `${videoPanePercent}%` }} 
-              className="h-full min-w-[280px] shrink-0"
-            >
-              <VideoPlayer 
-                videoUrl={videoUrl}
-                events={events}
-                activeEventId={activeEventId}
-                setActiveEventId={setActiveEventId}
-                playTarget={playTarget}
-                onTimeUpdate={(t) => setCurrentTime(t)}
-                frameRate={frameRate}
-                theme={theme}
-              />
-            </div>
-
-            {/* ── Sub-Splitter between Video and Inspector ── */}
-            <div 
-              onMouseDown={handleVideoSplitterDown}
-              className="w-2 hover:w-2.5 hover:bg-indigo-500/50 cursor-col-resize flex items-center justify-center transition-all group z-30 shrink-0"
-              title="Drag to resize Video vs Inspector"
-            >
-              <div className="w-1 h-12 bg-[#2d374d] rounded-full group-hover:bg-indigo-400 transition-colors" />
-            </div>
-
-            {/* Active Subtitle Inspector */}
-            <div className="flex-1 h-full min-w-[260px] overflow-hidden">
-              <SubtitleInspector 
-                activeEvent={activeEvent}
-                onUpdateEvent={handleUpdateEvent}
-                onSplitEvent={handleSplitEvent}
-                onMergeEvent={handleMergeEvents}
-                onDeleteEvent={handleDeleteEvent}
-                onRebreakEvent={handleRebreakEvent}
-                onNavigatePrev={() => {
-                  const idx = events.findIndex(e => e.id === activeEventId);
-                  if (idx > 0) setActiveEventId(events[idx - 1].id);
-                }}
-                onNavigateNext={() => {
-                  const idx = events.findIndex(e => e.id === activeEventId);
-                  if (idx < events.length - 1) setActiveEventId(events[idx + 1].id);
-                }}
-                currentTime={currentTime}
-                contentType={contentType}
-                cplLimit={cplLimit}
-                cpsLimit={cpsLimit}
-                frameRate={frameRate}
-                theme={theme}
-              />
-            </div>
+          {/* Right Panel: Full Video Player Viewport */}
+          <div className="flex-1 min-w-0 h-full overflow-hidden bg-black rounded-lg border border-[#262734]">
+            <VideoPlayer 
+              videoUrl={videoUrl}
+              events={events}
+              activeEventId={activeEventId}
+              setActiveEventId={setActiveEventId}
+              playTarget={playTarget}
+              onTimeUpdate={(t) => setCurrentTime(t)}
+              frameRate={frameRate}
+              theme={theme}
+              isAudio={isAudioFile}
+            />
           </div>
         </div>
 
         {/* ── Horizontal Resizer Splitter (Top Panels vs Bottom Timeline) ── */}
         <div 
           onMouseDown={handleBottomSplitterDown}
-          className="h-2 hover:h-2.5 hover:bg-indigo-500/50 cursor-row-resize flex items-center justify-center transition-all group z-30 w-full shrink-0"
+          className="h-2 hover:h-2.5 hover:bg-[#00e5be]/40 cursor-row-resize flex items-center justify-center transition-all group z-30 w-full shrink-0"
           title="Drag to resize Timeline height"
         >
-          <div className="h-1 w-16 bg-[#2d374d] rounded-full group-hover:bg-indigo-400 transition-colors" />
+          <div className="h-0.5 w-16 bg-[#262734] rounded-full group-hover:bg-[#00e5be] transition-colors" />
         </div>
 
         {/* Bottom Row: Audio Waveform Timeline with Clean Continuous Waveform & Rectangular Subtitle Boxes */}
@@ -1591,6 +1420,7 @@ export default function SubtitleApp({ onBackToHome }) {
             selectedFile={selectedFile}
             videoId={currentVideoId}
             API_BASE={API_BASE}
+            isAudio={isAudioFile}
             events={events} 
             shotChanges={shotChanges} 
             duration={videoDuration}
@@ -1613,9 +1443,7 @@ export default function SubtitleApp({ onBackToHome }) {
 
         {/* ── Slide-Over Netflix QC Panel Drawer ── */}
         {showQcDrawer && (
-          <div className={`fixed inset-y-0 right-0 z-50 w-80 md:w-96 shadow-2xl border-l p-4 flex flex-col animate-in slide-in-from-right duration-200 ${
-            isDark ? 'bg-[#141824] border-[#262e44] text-slate-200' : 'bg-white border-slate-200 text-slate-800'
-          }`}>
+          <div className="fixed inset-y-0 right-0 z-50 w-80 md:w-96 shadow-2xl border-l border-[#262734] bg-[#14151a] text-slate-200 p-4 flex flex-col animate-in slide-in-from-right duration-200">
             <NetflixQCPanel 
               complianceScore={complianceScore}
               totalErrors={totalErrors}

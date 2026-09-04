@@ -84,28 +84,28 @@ export default function BatchQueue({
   const processingCount = tasks.filter((t) => t.status === 'processing' || t.status === 'queued').length;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Upload Box & Batch Controls */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
-        <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+      <div className="bg-[#14151a] border border-[#262734] rounded-lg p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-5">
           <div>
-            <h2 className="text-lg font-bold text-slate-900 tracking-tight flex items-center gap-2">
-              <Layers className="w-5 h-5 text-indigo-600" />
+            <h2 className="text-sm font-bold text-slate-200 tracking-wider uppercase flex items-center gap-2">
+              <Layers className="w-4 h-4 text-[#00e5be]" />
               Batch Audio Processing Queue
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-slate-400 mt-0.5">
               Upload multiple conversational audio files for automated segmentation, transcription, and QA audits.
             </p>
           </div>
 
           {/* Language & Script Selector */}
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 text-xs text-slate-700 font-medium">
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 text-xs text-slate-300 font-medium">
               <span className="text-slate-500">Language:</span>
               <select
                 value={targetLanguage}
                 onChange={(e) => setTargetLanguage(e.target.value)}
-                className="bg-white border border-slate-300 px-3 py-1.5 rounded-lg text-xs font-semibold focus:ring-2 focus:ring-indigo-500"
+                className="bg-[#181920] border border-[#262734] text-slate-200 px-2.5 py-1 rounded text-xs font-semibold focus:border-[#00e5be] focus:outline-none cursor-pointer"
               >
                 <option value="Auto-Detect">⚡ Auto-Detect Language</option>
                 <option value="Hindi">Hindi (हिन्दी)</option>
@@ -119,12 +119,12 @@ export default function BatchQueue({
               </select>
             </div>
 
-            <div className="flex items-center gap-1.5 text-xs text-slate-700 font-medium">
+            <div className="flex items-center gap-1 text-xs text-slate-300 font-medium">
               <span className="text-slate-500">Script:</span>
               <select
                 value={targetScript}
                 onChange={(e) => setTargetScript(e.target.value)}
-                className="bg-white border border-slate-300 px-3 py-1.5 rounded-lg text-xs font-semibold focus:ring-2 focus:ring-indigo-500"
+                className="bg-[#181920] border border-[#262734] text-slate-200 px-2.5 py-1 rounded text-xs font-semibold focus:border-[#00e5be] focus:outline-none cursor-pointer"
               >
                 <option value="Auto-Detect">⚡ Auto-Detect Script</option>
                 <option value="Devanagari">Devanagari</option>
@@ -140,7 +140,7 @@ export default function BatchQueue({
         </div>
 
         {/* Drag & Drop Input */}
-        <div className="border-2 border-dashed border-indigo-200 hover:border-indigo-400 bg-indigo-50/30 hover:bg-indigo-50/60 rounded-2xl p-8 text-center transition-all">
+        <div className="border border-dashed border-[#262734] hover:border-[#00e5be]/50 bg-[#181920] hover:bg-[#1c1d25] rounded-lg p-6 text-center transition-all">
           <input
             type="file"
             id="batch-file-input"
@@ -149,33 +149,33 @@ export default function BatchQueue({
             onChange={handleFileChange}
             className="hidden"
           />
-          <label htmlFor="batch-file-input" className="cursor-pointer flex flex-col items-center gap-3">
-            <div className="h-12 w-12 rounded-xl bg-indigo-100 flex items-center justify-center text-indigo-600 shadow-xs">
-              <Upload className="w-6 h-6" />
+          <label htmlFor="batch-file-input" className="cursor-pointer flex flex-col items-center gap-2">
+            <div className="h-10 w-10 rounded bg-[#22232c] border border-[#323444] flex items-center justify-center text-[#00e5be] shadow-xs">
+              <Upload className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-sm font-bold text-slate-800">
+              <p className="text-xs font-bold text-slate-200">
                 {selectedFiles.length > 0
                   ? `${selectedFiles.length} audio file(s) selected`
                   : 'Click to select audio files or drag & drop here'}
               </p>
-              <p className="text-xs text-slate-500 mt-1">Supports WAV, MP3, M4A, FLAC, OGG, AAC</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">Supports WAV, MP3, M4A, FLAC, OGG, AAC</p>
             </div>
           </label>
 
           {selectedFiles.length > 0 && (
-            <div className="mt-4 flex items-center justify-center gap-3">
+            <div className="mt-3 flex items-center justify-center gap-2">
               <button
                 onClick={handleStartBatch}
                 disabled={isUploading}
-                className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition-transform active:scale-95 disabled:opacity-50"
+                className="flex items-center gap-2 px-4 py-2 bg-[#00e5be] hover:bg-[#00c9a7] text-black rounded text-xs font-bold shadow-[0_0_12px_rgba(0,229,190,0.25)] transition-transform active:scale-95 disabled:opacity-50 cursor-pointer"
               >
-                {isUploading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
+                {isUploading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5 fill-current" />}
                 Start Processing {selectedFiles.length} Files
               </button>
               <button
                 onClick={() => setSelectedFiles([])}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold"
+                className="px-3 py-2 bg-[#22232c] hover:bg-[#2c2d38] text-slate-300 rounded text-xs font-semibold cursor-pointer border border-[#323444]"
               >
                 Clear
               </button>
@@ -185,26 +185,26 @@ export default function BatchQueue({
       </div>
 
       {/* Queue Status & Actions */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
-        <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-200 mb-4">
+      <div className="bg-[#14151a] border border-[#262734] rounded-lg p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4 pb-3 border-b border-[#262734] mb-3">
           <div className="flex items-center gap-3 text-xs font-semibold">
-            <span className="text-slate-800">Tasks: {tasks.length}</span>
-            <span className="text-indigo-600">⚡ {processingCount} Active</span>
-            <span className="text-emerald-600">✓ {completedCount} Done</span>
+            <span className="text-slate-300">Tasks: {tasks.length}</span>
+            <span className="text-[#00e5be]">⚡ {processingCount} Active</span>
+            <span className="text-emerald-400">✓ {completedCount} Done</span>
           </div>
 
           <div className="flex items-center gap-2">
             <button
               onClick={() => downloadZip('all')}
               disabled={completedCount === 0}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs disabled:opacity-50 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold shadow-xs disabled:opacity-50 transition-colors cursor-pointer"
             >
               <Download className="w-3.5 h-3.5" />
               Download All Deliverables (ZIP)
             </button>
             <button
               onClick={clearCompleted}
-              className="p-1.5 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs"
+              className="p-1.5 text-slate-400 hover:text-white bg-[#181920] hover:bg-[#22232c] border border-[#262734] rounded text-xs cursor-pointer"
               title="Clear completed tasks"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -216,20 +216,20 @@ export default function BatchQueue({
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead>
-              <tr className="border-b border-slate-200 text-slate-500 font-bold bg-slate-50">
-                <th className="py-2.5 pl-3">Filename</th>
-                <th className="py-2.5">Status</th>
-                <th className="py-2.5">Language</th>
-                <th className="py-2.5">Segments</th>
-                <th className="py-2.5">Compliance Score</th>
-                <th className="py-2.5">QC Issues</th>
-                <th className="py-2.5 text-right pr-3">Action</th>
+              <tr className="border-b border-[#262734] text-slate-400 font-bold bg-[#181920]">
+                <th className="py-2 pl-3">Filename</th>
+                <th className="py-2">Status</th>
+                <th className="py-2">Language</th>
+                <th className="py-2">Segments</th>
+                <th className="py-2">Compliance Score</th>
+                <th className="py-2">QC Issues</th>
+                <th className="py-2 text-right pr-3">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-[#262734]">
               {tasks.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-8 text-slate-400 font-medium">
+                  <td colSpan={7} className="text-center py-8 text-slate-500 font-medium">
                     Queue is empty. Select audio files above to begin batch processing.
                   </td>
                 </tr>
@@ -240,35 +240,35 @@ export default function BatchQueue({
                   const score = t.result ? t.result.compliance_score : null;
 
                   return (
-                    <tr key={t.task_id} className="hover:bg-slate-50">
-                      <td className="py-3 pl-3 font-semibold text-slate-900 max-w-[200px] truncate">{t.filename}</td>
-                      <td className="py-3">
+                    <tr key={t.task_id} className="hover:bg-[#181920]/80">
+                      <td className="py-2.5 pl-3 font-semibold text-slate-200 max-w-[200px] truncate">{t.filename}</td>
+                      <td className="py-2.5">
                         <span
-                          className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
                             isDone
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
                               : isProc
-                              ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 animate-pulse'
-                              : 'bg-slate-100 text-slate-600'
+                              ? 'bg-[#00e5be]/15 text-[#00e5be] border border-[#00e5be]/30 animate-pulse'
+                              : 'bg-[#22232c] text-slate-400 border border-[#323444]'
                           }`}
                         >
                           {isProc && <RefreshCw className="w-2.5 h-2.5 animate-spin" />}
                           {t.status.toUpperCase()}
                         </span>
                       </td>
-                      <td className="py-3 text-slate-600 font-medium">{t.language} ({t.script})</td>
-                      <td className="py-3 text-slate-700 font-mono font-bold">
+                      <td className="py-2.5 text-slate-400 font-medium">{t.language} ({t.script})</td>
+                      <td className="py-2.5 text-slate-200 font-mono font-bold">
                         {t.result ? t.result.segments.length : '--'}
                       </td>
-                      <td className="py-3">
+                      <td className="py-2.5">
                         {score !== null ? (
                           <span
-                            className={`font-bold font-mono px-2 py-0.5 rounded ${
+                            className={`font-bold font-mono px-1.5 py-0.5 rounded text-[11px] ${
                               score >= 98
-                                ? 'bg-emerald-100 text-emerald-800'
+                                ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
                                 : score >= 80
-                                ? 'bg-amber-100 text-amber-800'
-                                : 'bg-rose-100 text-rose-800'
+                                ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                                : 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
                             }`}
                           >
                             {score}%
@@ -277,18 +277,18 @@ export default function BatchQueue({
                           '--'
                         )}
                       </td>
-                      <td className="py-3 text-slate-600 max-w-[250px] truncate font-medium">
+                      <td className="py-2.5 text-slate-400 max-w-[250px] truncate font-medium">
                         {isDone && (
                           <span>
                             {t.result?.total_errors || 0} errors, {t.result?.total_warnings || 0} warnings
                           </span>
                         )}
                       </td>
-                      <td className="py-3 text-right pr-3">
+                      <td className="py-2.5 text-right pr-3">
                         {t.result && (
                           <button
                             onClick={() => onLoadIntoStudio(t.result)}
-                            className="inline-flex items-center gap-1 px-3 py-1 bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white rounded-lg text-xs font-bold transition-colors"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#00e5be]/15 hover:bg-[#00e5be] text-[#00e5be] hover:text-black border border-[#00e5be]/30 rounded text-xs font-bold transition-colors cursor-pointer"
                           >
                             <Eye className="w-3 h-3" />
                             Open Studio

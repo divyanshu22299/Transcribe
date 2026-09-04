@@ -19,7 +19,7 @@ const EXPORT_FORMATS = [
     icon: FileText,
     description: 'Universal standard subtitle format with millisecond timecodes and styling.',
     badge: 'Universal',
-    badgeColor: 'bg-indigo-950 text-indigo-300 border-indigo-800',
+    badgeColor: 'bg-[#1c1d25] text-[#00e5ff] border-[#00e5ff]/40',
   },
   {
     key: 'vtt',
@@ -42,7 +42,7 @@ const EXPORT_FORMATS = [
 ];
 
 export default function SubtitleExportModal({ isOpen, onClose, events = [], filename = 'subtitles', complianceScore = 100 }) {
-  const [selectedFormat, setSelectedFormat] = useState('ttml');
+  const [selectedFormat, setSelectedFormat] = useState('srt');
   const [isExporting, setIsExporting] = useState(false);
   const [customFilename, setCustomFilename] = useState('');
 
@@ -98,22 +98,22 @@ export default function SubtitleExportModal({ isOpen, onClose, events = [], file
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4" onClick={onClose}>
-      <div className="bg-[#141824] border border-[#2a344a] rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden text-slate-200" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4" onClick={onClose}>
+      <div className="bg-[#14151a] border border-[#262734] rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden text-slate-200" onClick={e => e.stopPropagation()}>
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#232a3d]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#262734]">
           <div>
             <h2 className="text-base font-bold text-white uppercase tracking-wider">Export Timed Text Deliverables</h2>
             <p className="text-xs text-slate-400 mt-0.5">{events.length} subtitle events · {exportFilename}{selectedFormatInfo?.ext}</p>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-[#202738] text-slate-400 hover:text-white transition-colors cursor-pointer">
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-[#22232c] text-slate-400 hover:text-white transition-colors cursor-pointer">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Compliance Alert */}
         {!isPassing && (
-          <div className="mx-6 mt-4 p-3 rounded-2xl bg-amber-950/40 border border-amber-800/80 flex items-start gap-3">
+          <div className="mx-6 mt-4 p-3 rounded-xl bg-amber-950/30 border border-amber-800/60 flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
             <div>
               <p className="text-xs font-bold text-amber-300">Netflix QC Compliance: {complianceScore}%</p>
@@ -130,7 +130,7 @@ export default function SubtitleExportModal({ isOpen, onClose, events = [], file
             value={customFilename}
             onChange={e => setCustomFilename(e.target.value)}
             placeholder={filename.replace(/\.[^/.]+$/, '')}
-            className="w-full mt-1 px-3 py-2 rounded-xl bg-[#0d1017] border border-[#283045] text-xs text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+            className="w-full mt-1 px-3 py-2 rounded-xl bg-[#0e0f12] border border-[#262734] text-xs text-white focus:outline-none focus:border-[#00e5be] font-mono"
           />
         </div>
 
@@ -144,13 +144,13 @@ export default function SubtitleExportModal({ isOpen, onClose, events = [], file
               <button
                 key={fmt.key}
                 onClick={() => setSelectedFormat(fmt.key)}
-                className={`w-full flex items-center gap-3 p-3 rounded-2xl border-2 transition-all text-left cursor-pointer ${
+                className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-all text-left cursor-pointer ${
                   isSelected
-                    ? 'border-indigo-500 bg-indigo-950/40 shadow-md'
-                    : 'border-[#222838] bg-[#0f121a] hover:border-[#2d374d] hover:bg-[#161a24]'
+                    ? 'border-[#00e5be] bg-[#00e5be]/10 shadow-[0_0_12px_rgba(0,229,190,0.15)]'
+                    : 'border-[#262734] bg-[#181920] hover:border-[#383a4c] hover:bg-[#22232c]'
                 }`}
               >
-                <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${isSelected ? 'bg-indigo-600 text-white' : 'bg-[#1c2233] text-slate-400'}`}>
+                <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${isSelected ? 'bg-[#00e5be] text-black shadow-xs' : 'bg-[#14151a] text-slate-400'}`}>
                   <Icon className="w-4 h-4" />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -161,8 +161,8 @@ export default function SubtitleExportModal({ isOpen, onClose, events = [], file
                   <p className="text-[10px] text-slate-400 mt-0.5 truncate">{fmt.description}</p>
                 </div>
                 {isSelected && (
-                  <div className="w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center shrink-0">
-                    <Check className="w-3 h-3 text-white" />
+                  <div className="w-5 h-5 rounded-full bg-[#00e5be] text-black flex items-center justify-center shrink-0">
+                    <Check className="w-3 h-3 text-black font-bold" />
                   </div>
                 )}
               </button>
@@ -174,28 +174,28 @@ export default function SubtitleExportModal({ isOpen, onClose, events = [], file
         {srtPreview && (
           <div className="px-6 pt-3">
             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Sample Preview</label>
-            <pre className="mt-1 p-2.5 rounded-xl bg-[#0a0c12] border border-[#22283a] text-emerald-400 text-[10px] font-mono max-h-20 overflow-auto">
+            <pre className="mt-1 p-2.5 rounded-xl bg-[#0e0f12] border border-[#262734] text-[#00e5be] text-[10px] font-mono max-h-20 overflow-auto custom-scrollbar">
               {srtPreview}
             </pre>
           </div>
         )}
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-2.5 px-6 py-4 mt-3 border-t border-[#232a3d]">
+        <div className="flex items-center justify-end gap-2.5 px-6 py-4 mt-3 border-t border-[#262734]">
           <button
             onClick={onClose}
-            className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-[#1e2536] transition-colors cursor-pointer"
+            className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 bg-[#181920] hover:bg-[#22232c] border border-[#262734] transition-colors cursor-pointer"
           >
             Cancel
           </button>
           <button
             onClick={handleExport}
             disabled={isExporting || !events || events.length === 0}
-            className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+            className="px-5 py-2 rounded-xl text-xs font-bold text-black bg-[#00e5be] hover:bg-[#00c9a7] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-[0_0_12px_rgba(0,229,190,0.25)] flex items-center gap-1.5 cursor-pointer"
           >
             {isExporting ? (
               <>
-                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <div className="w-3.5 h-3.5 border-2 border-black/30 border-t-black rounded-full animate-spin" />
                 Compiling...
               </>
             ) : (

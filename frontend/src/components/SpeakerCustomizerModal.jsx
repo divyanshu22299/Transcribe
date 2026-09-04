@@ -51,7 +51,7 @@ export default function SpeakerCustomizerModal({ isOpen, onClose, segments, onUp
   };
 
   const getSpeakerThemeDot = (speakerName) => {
-    const colors = ['bg-indigo-500', 'bg-emerald-500', 'bg-violet-500', 'bg-cyan-500', 'bg-pink-500', 'bg-orange-500'];
+    const colors = ['bg-[#00e5be]', 'bg-[#00e5ff]', 'bg-[#a855f7]', 'bg-[#ec4899]', 'bg-[#f59e0b]', 'bg-[#10b981]'];
     let hash = 0;
     for (let i = 0; i < (speakerName || '').length; i++) hash = speakerName.charCodeAt(i) + ((hash << 5) - hash);
     return colors[Math.abs(hash) % colors.length];
@@ -60,22 +60,22 @@ export default function SpeakerCustomizerModal({ isOpen, onClose, segments, onUp
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
-      <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-xl p-6 shadow-2xl flex flex-col max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+      <div className="bg-[#14151a] border border-[#262734] rounded-2xl w-full max-w-xl p-6 shadow-2xl flex flex-col max-h-[90vh] overflow-y-auto text-slate-200 custom-scrollbar">
         {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
+        <div className="flex items-center justify-between pb-4 border-b border-[#262734] mb-5">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-2xl">
+            <div className="p-2.5 bg-[#00e5be]/15 text-[#00e5be] border border-[#00e5be]/30 rounded-xl">
               <Users className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-900">Speaker Management & Renaming</h2>
-              <p className="text-xs text-slate-500">Bulk rename or swap speaker diarization tags across all segments</p>
+              <h2 className="text-base font-bold text-white">Speaker Management & Renaming</h2>
+              <p className="text-xs text-slate-400">Bulk rename or swap speaker diarization tags across all segments</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-700 rounded-xl bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer"
+            className="p-2 text-slate-400 hover:text-white rounded-xl bg-[#181920] hover:bg-[#22232c] border border-[#262734] transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -83,8 +83,8 @@ export default function SpeakerCustomizerModal({ isOpen, onClose, segments, onUp
 
         {/* Toast Alert */}
         {toastMsg && (
-          <div className="mb-4 p-2.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
-            <Check className="w-4 h-4 text-emerald-600" />
+          <div className="mb-4 p-2.5 bg-[#00e5be]/15 text-[#00e5be] border border-[#00e5be]/30 rounded-xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
+            <Check className="w-4 h-4 text-[#00e5be]" />
             <span>{toastMsg}</span>
           </div>
         )}
@@ -92,8 +92,8 @@ export default function SpeakerCustomizerModal({ isOpen, onClose, segments, onUp
         <div className="space-y-5">
           {/* Section 1: Rename Individual Speakers */}
           <div className="space-y-3">
-            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-              <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
+            <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+              <UserCheck className="w-3.5 h-3.5 text-[#00e5be]" />
               <span>Rename Speakers & Themes</span>
             </h3>
 
@@ -101,13 +101,13 @@ export default function SpeakerCustomizerModal({ isOpen, onClose, segments, onUp
               {uniqueSpeakers.map((spk) => {
                 const count = segments.filter(s => s.speaker === spk).length;
                 return (
-                  <div key={spk} className="flex items-center gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-2xl">
-                    <div className="min-w-[125px] flex items-center gap-1.5 text-xs font-bold text-slate-800 truncate">
+                  <div key={spk} className="flex items-center gap-2 p-2.5 bg-[#181920] border border-[#262734] rounded-xl">
+                    <div className="min-w-[125px] flex items-center gap-1.5 text-xs font-bold text-slate-200 truncate">
                       <span className={`w-2.5 h-2.5 rounded-full ${getSpeakerThemeDot(spk)} shrink-0`} title="Waveform Theme Color" />
                       <span className="truncate">{spk}</span>
                       <span className="text-[10px] text-slate-400 font-normal ml-0.5">({count})</span>
                     </div>
-                    <span className="text-slate-400 text-xs">➔</span>
+                    <span className="text-slate-500 text-xs">➔</span>
                     <input
                       type="text"
                       placeholder={`New name for ${spk}...`}
@@ -116,12 +116,12 @@ export default function SpeakerCustomizerModal({ isOpen, onClose, segments, onUp
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') handleRename(spk);
                       }}
-                      className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-indigo-500 font-medium"
+                      className="flex-1 bg-[#0e0f12] border border-[#262734] rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#00e5be] font-medium"
                     />
                     <button
                       onClick={() => handleRename(spk)}
                       disabled={!(renameMap[spk] || '').trim()}
-                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+                      className="px-3 py-1.5 bg-[#00e5be] hover:bg-[#00c9a7] disabled:opacity-40 text-black rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs"
                     >
                       Rename
                     </button>
@@ -133,28 +133,28 @@ export default function SpeakerCustomizerModal({ isOpen, onClose, segments, onUp
 
           {/* Section 2: Swap Two Speakers */}
           {uniqueSpeakers.length >= 2 && (
-            <div className="space-y-3 pt-3 border-t border-slate-100">
-              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                <ArrowLeftRight className="w-3.5 h-3.5 text-indigo-600" />
+            <div className="space-y-3 pt-3 border-t border-[#262734]">
+              <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                <ArrowLeftRight className="w-3.5 h-3.5 text-[#00e5be]" />
                 <span>Bulk Swap Speaker Labels</span>
               </h3>
 
-              <div className="flex flex-wrap items-center gap-2 p-3 bg-indigo-50/50 border border-indigo-100 rounded-2xl">
+              <div className="flex flex-wrap items-center gap-2 p-3 bg-[#181920] border border-[#262734] rounded-xl">
                 <select
                   value={swapFrom}
                   onChange={(e) => setSwapFrom(e.target.value)}
-                  className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 cursor-pointer"
+                  className="flex-1 bg-[#0e0f12] border border-[#262734] rounded-xl px-3 py-2 text-xs font-semibold text-slate-200 cursor-pointer focus:outline-none focus:border-[#00e5be]"
                 >
                   <option value="">Select Speaker A...</option>
                   {uniqueSpeakers.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
 
-                <ArrowLeftRight className="w-4 h-4 text-indigo-600 shrink-0" />
+                <ArrowLeftRight className="w-4 h-4 text-[#00e5be] shrink-0" />
 
                 <select
                   value={swapTo}
                   onChange={(e) => setSwapTo(e.target.value)}
-                  className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 cursor-pointer"
+                  className="flex-1 bg-[#0e0f12] border border-[#262734] rounded-xl px-3 py-2 text-xs font-semibold text-slate-200 cursor-pointer focus:outline-none focus:border-[#00e5be]"
                 >
                   <option value="">Select Speaker B...</option>
                   {uniqueSpeakers.map(s => <option key={s} value={s}>{s}</option>)}
@@ -163,7 +163,7 @@ export default function SpeakerCustomizerModal({ isOpen, onClose, segments, onUp
                 <button
                   onClick={handleSwapSpeakers}
                   disabled={!swapFrom || !swapTo || swapFrom === swapTo}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+                  className="px-4 py-2 bg-[#00e5be] hover:bg-[#00c9a7] disabled:opacity-40 text-black rounded-xl text-xs font-bold transition-all shadow-[0_0_12px_rgba(0,229,190,0.25)] cursor-pointer"
                 >
                   Swap All
                 </button>
@@ -173,10 +173,10 @@ export default function SpeakerCustomizerModal({ isOpen, onClose, segments, onUp
         </div>
 
         {/* Footer */}
-        <div className="mt-5 pt-3 border-t border-slate-100 flex justify-end">
+        <div className="mt-5 pt-3 border-t border-[#262734] flex justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+            className="px-4 py-2 bg-[#181920] hover:bg-[#22232c] text-slate-300 rounded-xl text-xs font-semibold border border-[#262734] transition-colors cursor-pointer"
           >
             Done
           </button>

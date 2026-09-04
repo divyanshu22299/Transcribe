@@ -169,7 +169,7 @@ export default function AudioWaveformTimeline({
     const maxAmplitude = height * 0.38;
 
     // Draw center baseline
-    ctx.strokeStyle = isDark ? 'rgba(70, 85, 115, 0.35)' : 'rgba(180, 195, 220, 0.6)';
+    ctx.strokeStyle = 'rgba(70, 85, 115, 0.35)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(0, centerY);
@@ -207,24 +207,18 @@ export default function AudioWaveformTimeline({
 
     // Clean gradient fill
     const fillGradient = ctx.createLinearGradient(0, centerY - maxAmplitude, 0, centerY + maxAmplitude);
-    if (isDark) {
-      fillGradient.addColorStop(0, 'rgba(99, 102, 241, 0.45)');
-      fillGradient.addColorStop(0.5, 'rgba(45, 212, 191, 0.55)');
-      fillGradient.addColorStop(1, 'rgba(99, 102, 241, 0.45)');
-    } else {
-      fillGradient.addColorStop(0, 'rgba(79, 70, 229, 0.35)');
-      fillGradient.addColorStop(0.5, 'rgba(13, 148, 136, 0.45)');
-      fillGradient.addColorStop(1, 'rgba(79, 70, 229, 0.35)');
-    }
+    fillGradient.addColorStop(0, 'rgba(0, 229, 190, 0.35)');
+    fillGradient.addColorStop(0.5, 'rgba(0, 229, 255, 0.50)');
+    fillGradient.addColorStop(1, 'rgba(0, 229, 190, 0.35)');
 
     ctx.fillStyle = fillGradient;
     ctx.fill();
 
     // Crisp continuous outline stroke
-    ctx.strokeStyle = isDark ? 'rgba(129, 140, 248, 0.90)' : 'rgba(67, 56, 202, 0.90)';
+    ctx.strokeStyle = 'rgba(0, 229, 190, 0.90)';
     ctx.lineWidth = 1.4;
     ctx.stroke();
-  }, [waveformPeaks, waveformPointsPerSec, zoomLevel, timelineWidth, isDark]);
+  }, [waveformPeaks, waveformPointsPerSec, zoomLevel, timelineWidth]);
 
   // ── 3. Left-Oriented Zoom Controller (Left edge anchored, right edge expands/contracts) ──
   const handleZoomChange = useCallback((newZoom) => {
@@ -428,29 +422,23 @@ export default function AudioWaveformTimeline({
   return (
     <div 
       ref={containerRef}
-      className={`rounded-xl border flex flex-col w-full h-full overflow-hidden select-none transition-colors shadow-xs ${
-        isDark ? 'bg-[#0b0e17] border-[#202738]' : 'bg-white border-slate-200'
-      }`}
+      className="rounded-xl border border-[#262734] bg-[#0e0f12] flex flex-col w-full h-full overflow-hidden select-none transition-colors shadow-xs"
     >
       {/* ── Timeline Ribbon Header ── */}
-      <div className={`px-3 py-1.5 border-b flex items-center justify-between text-xs shrink-0 transition-colors ${
-        isDark ? 'bg-[#121623] border-[#202738] text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'
-      }`}>
+      <div className="px-3 py-1.5 border-b border-[#262734] bg-[#14151a] text-slate-300 flex items-center justify-between text-xs shrink-0 transition-colors">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5 font-bold font-mono text-[11px]">
-            <Volume2 className="w-3.5 h-3.5 text-indigo-400" />
-            <span>AUDIO WAVEFORM TIMELINE</span>
+            <Volume2 className="w-3.5 h-3.5 text-[#00e5be]" />
+            <span className="text-slate-200 uppercase tracking-wider">AUDIO WAVEFORM TIMELINE</span>
             {isAudioLoading && (
               <span className="text-[10px] text-amber-400 animate-pulse font-sans font-normal">(Extracting Audio...)</span>
             )}
           </div>
 
           {/* Left-Oriented Zoom Slider & Buttons */}
-          <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-lg border ${
-            isDark ? 'bg-[#181e2e] border-[#283248]' : 'bg-white border-slate-300'
-          }`}>
+          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg border border-[#262734] bg-[#181920]">
             <ZoomOut 
-              className={`w-3.5 h-3.5 cursor-pointer transition-colors ${isDark ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-900'}`} 
+              className="w-3.5 h-3.5 cursor-pointer transition-colors text-slate-400 hover:text-white" 
               onClick={() => handleZoomChange(zoomLevel - 15)} 
               title="Zoom Out (Ctrl+Wheel Down)"
             />
@@ -460,14 +448,14 @@ export default function AudioWaveformTimeline({
               max="220" 
               value={zoomLevel} 
               onChange={(e) => handleZoomChange(Number(e.target.value))}
-              className="w-24 h-1 bg-slate-400 rounded-full appearance-none cursor-pointer accent-indigo-600"
+              className="w-24 h-1 bg-slate-600 rounded-full appearance-none cursor-pointer accent-[#00e5be]"
             />
             <ZoomIn 
-              className={`w-3.5 h-3.5 cursor-pointer transition-colors ${isDark ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-900'}`} 
+              className="w-3.5 h-3.5 cursor-pointer transition-colors text-slate-400 hover:text-white" 
               onClick={() => handleZoomChange(zoomLevel + 15)} 
               title="Zoom In (Ctrl+Wheel Up)"
             />
-            <span className="text-[10px] font-mono font-semibold opacity-80 pl-1">{zoomLevel} px/s</span>
+            <span className="text-[10px] font-mono font-semibold opacity-80 pl-1 text-slate-300">{zoomLevel} px/s</span>
           </div>
 
           {/* Subtitle Shift & Add Buttons */}
@@ -475,11 +463,7 @@ export default function AudioWaveformTimeline({
             {onShiftAllFollowing && (
               <button
                 onClick={() => onShiftAllFollowing(activeEventId, currentTime)}
-                className={`px-2.5 py-1 text-xs rounded-lg font-bold transition-colors cursor-pointer border flex items-center gap-1.5 ${
-                  isDark 
-                    ? 'bg-[#1a2130] hover:bg-[#252f45] text-cyan-300 border-[#2b364e]' 
-                    : 'bg-cyan-50 hover:bg-cyan-100 text-cyan-800 border-cyan-300'
-                }`}
+                className="px-2.5 py-1 text-xs rounded-lg font-bold transition-colors cursor-pointer border border-[#262734] bg-[#181920] hover:bg-[#22232c] text-cyan-400 flex items-center gap-1.5"
                 title="Move active & all following subtitles to playhead preserving relative spacing (Ctrl+Space or Ctrl+Enter)"
               >
                 <FastForward size={12} />
@@ -490,7 +474,7 @@ export default function AudioWaveformTimeline({
             {onAddSubtitleAtTime && (
               <button
                 onClick={() => onAddSubtitleAtTime(currentTime)}
-                className="px-2.5 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-bold transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
+                className="px-2.5 py-1 text-xs bg-[#00e5be] hover:bg-[#00c9a7] text-black rounded-lg font-bold transition-transform active:scale-95 cursor-pointer flex items-center gap-1 shadow-[0_0_12px_rgba(0,229,190,0.25)]"
                 title="Add Subtitle at current playhead"
               >
                 <Plus size={12} />
@@ -501,21 +485,17 @@ export default function AudioWaveformTimeline({
         </div>
 
         {/* Timecode Readout */}
-        <div className={`text-xs font-mono px-3 py-1 rounded-lg border flex items-center gap-2 ${
-          isDark ? 'bg-[#0a0d14] border-[#242c3f]' : 'bg-white border-slate-300'
-        }`}>
-          <span className={`font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{formatTime(currentTime)}</span>
-          <span className="opacity-40">/</span>
-          <span className="opacity-80">{formatTime(effectiveDuration)}</span>
+        <div className="text-xs font-mono px-3 py-1 rounded-lg border border-[#262734] bg-[#181920] flex items-center gap-2">
+          <span className="font-bold text-[#00e5be]">{formatTime(currentTime)}</span>
+          <span className="opacity-40 text-slate-500">/</span>
+          <span className="opacity-70 text-slate-400">{formatTime(effectiveDuration)}</span>
         </div>
       </div>
 
       {/* ── Continuous Waveform & Precise Subtitle Boxes ── */}
       <div 
         ref={scrollRef}
-        className={`relative flex-1 overflow-x-auto overflow-y-hidden cursor-crosshair custom-scrollbar min-h-[140px] ${
-          isDark ? 'bg-[#080b11]' : 'bg-slate-100'
-        }`}
+        className="relative flex-1 overflow-x-auto overflow-y-hidden cursor-crosshair custom-scrollbar min-h-[140px] bg-[#0e0f12]"
         onClick={handleTrackClick}
       >
         <div 
@@ -523,18 +503,14 @@ export default function AudioWaveformTimeline({
           style={{ width: `${timelineWidth}px` }}
         >
           {/* Timecode Ruler Bar */}
-          <div className={`absolute top-0 left-0 w-full h-6 border-b pointer-events-none z-10 ${
-            isDark ? 'bg-[#0e121b]/90 border-[#1f2638]' : 'bg-white/90 border-slate-200'
-          }`}>
+          <div className="absolute top-0 left-0 w-full h-6 border-b border-[#262734] bg-[#14151a]/95 pointer-events-none z-10">
             {marks.map((time) => (
               <div 
                 key={time} 
-                className={`absolute top-0 h-full border-l pl-1 flex items-center ${
-                  isDark ? 'border-[#222a3d]' : 'border-slate-300'
-                }`}
+                className="absolute top-0 h-full border-l border-[#262734] pl-1 flex items-center"
                 style={{ left: `${time * zoomLevel}px` }}
               >
-                <span className={`text-[10px] font-mono font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                <span className="text-[10px] font-mono font-semibold text-slate-400">
                   {formatTime(time)}
                 </span>
               </div>
@@ -548,7 +524,7 @@ export default function AudioWaveformTimeline({
             className="absolute top-0 left-0 pointer-events-none z-0"
           />
 
-          {/* ── Subtitle Boxes (Minimized Ultra-Clean Borders for Perfect Waveform Sync) ── */}
+          {/* ── Subtitle Boxes (CapCut Dark Studio Blocks) ── */}
           <div className="absolute top-6 bottom-0 w-full pointer-events-none z-20">
             {events.map((event) => {
               const start = getStart(event);
@@ -576,22 +552,14 @@ export default function AudioWaveformTimeline({
                   key={id}
                   className={`absolute top-0.5 bottom-0.5 rounded-[4px] flex flex-col pointer-events-auto select-none transition-colors shadow-xs ${
                     isActive 
-                      ? isDark 
-                        ? 'border-2 border-indigo-400 bg-indigo-950/50 text-white z-30 shadow-md ring-1 ring-indigo-400/50 backdrop-blur-[1px]' 
-                        : 'border-2 border-indigo-600 bg-indigo-100/55 text-slate-950 z-30 shadow-md ring-1 ring-indigo-500/50 backdrop-blur-[1px]'
+                      ? 'border-2 border-[#00e5be] bg-[#00e5be]/15 text-white z-30 shadow-[0_0_12px_rgba(0,229,190,0.3)] ring-1 ring-[#00e5be]/40 backdrop-blur-[1px]' 
                       : 'z-20 hover:brightness-110'
                   } ${
                     isRed 
-                      ? isDark 
-                        ? 'bg-rose-950/45 border-2 border-rose-500 text-rose-100 backdrop-blur-[1px]' 
-                        : 'bg-rose-100/55 border-2 border-rose-500 text-rose-950 backdrop-blur-[1px]'
+                      ? 'bg-rose-950/40 border-2 border-rose-500 text-rose-100 backdrop-blur-[1px]' 
                       : isYellow
-                      ? isDark
-                        ? 'bg-amber-950/45 border-2 border-amber-400 text-amber-100 backdrop-blur-[1px]' 
-                        : 'bg-amber-100/55 border-2 border-amber-500 text-amber-950 backdrop-blur-[1px]'
-                      : isDark
-                        ? 'bg-[#0f172a]/45 border border-slate-500/90 text-slate-100 backdrop-blur-[1px]'
-                        : 'bg-white/55 border border-slate-400/90 text-slate-950 backdrop-blur-[1px]'
+                      ? 'bg-amber-950/40 border-2 border-amber-400 text-amber-100 backdrop-blur-[1px]' 
+                      : 'bg-[#181920]/85 border border-[#262734] text-slate-200 backdrop-blur-[1px]'
                   }`}
                   style={{ left: `${startX}px`, width: `${width}px` }}
                   onClick={(e) => {
@@ -611,18 +579,16 @@ export default function AudioWaveformTimeline({
                 >
                   {/* Active Top Glowing Accent Line */}
                   {isActive && (
-                    <div className="absolute top-0 left-0 right-0 h-0.5 bg-indigo-400 shadow-[0_0_8px_rgba(129,140,248,1)] z-30" />
+                    <div className="absolute top-0 left-0 right-0 h-0.5 bg-[#00e5be] shadow-[0_0_8px_rgba(0,229,190,1)] z-30" />
                   )}
 
                   {/* Left Trim Handle (In-Point) */}
                   <div
                     onMouseDown={(e) => handleMouseDown(e, id, 'resize-start')}
-                    className={`absolute left-0 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-indigo-500 flex items-center justify-center z-30 group/handle ${
-                      isDark ? 'bg-black/30 hover:bg-indigo-600' : 'bg-slate-200 hover:bg-indigo-600'
-                    }`}
+                    className="absolute left-0 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-[#00e5be] flex items-center justify-center z-30 group/handle bg-black/30"
                     title="Drag to trim In-Point"
                   >
-                    <div className="w-0.5 h-7 bg-indigo-400 group-hover/handle:bg-white transition-all" />
+                    <div className="w-0.5 h-7 bg-[#00e5be] group-hover/handle:bg-white transition-all" />
                   </div>
 
                   {/* Body Drag Area (Move Entire Subtitle) */}
@@ -632,10 +598,8 @@ export default function AudioWaveformTimeline({
                     title="Click & drag to move subtitle block"
                   >
                     {/* Top Meta Bar */}
-                    <div className={`flex items-center justify-between text-[9.5px] font-mono border-b pb-0.5 shrink-0 ${
-                      isDark ? 'border-slate-700/60' : 'border-slate-200'
-                    }`}>
-                      <span className="font-bold px-1.5 py-0.2 rounded bg-indigo-600 text-white font-mono shadow-2xs">
+                    <div className="flex items-center justify-between text-[9.5px] font-mono border-b border-[#262734] pb-0.5 shrink-0">
+                      <span className="font-bold px-1.5 py-0.2 rounded bg-[#00e5be] text-black font-mono shadow-2xs">
                         #{id}
                       </span>
                       <div className="flex items-center gap-1">
@@ -649,22 +613,18 @@ export default function AudioWaveformTimeline({
                             {calcCps.toFixed(1)} CPS
                           </span>
                         ) : (
-                          <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
+                          <CheckCircle2 className="w-3 h-3 text-[#00e5be] shrink-0" />
                         )}
                       </div>
                     </div>
 
                     {/* Dialogue Line Text in center */}
-                    <div className={`text-[11.5px] leading-snug line-clamp-3 font-sans font-bold whitespace-pre-wrap my-auto px-0.5 ${
-                      isDark ? 'text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)]' : 'text-slate-950 drop-shadow-[0_1px_1px_rgba(255,255,255,0.8)]'
-                    }`}>
+                    <div className="text-[11.5px] leading-snug line-clamp-3 font-sans font-bold whitespace-pre-wrap my-auto px-0.5 text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)]">
                       {event.text}
                     </div>
 
                     {/* Bottom Timecode Readout */}
-                    <div className={`text-[9px] font-mono flex justify-between shrink-0 font-bold ${
-                      isDark ? 'text-slate-200' : 'text-slate-700'
-                    }`}>
+                    <div className="text-[9px] font-mono flex justify-between shrink-0 font-bold text-slate-300">
                       <span>{formatTime(start)}</span>
                       <span>{formatTime(end)}</span>
                     </div>
@@ -673,12 +633,10 @@ export default function AudioWaveformTimeline({
                   {/* Right Trim Handle (Out-Point) */}
                   <div
                     onMouseDown={(e) => handleMouseDown(e, id, 'resize-end')}
-                    className={`absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-indigo-500 flex items-center justify-center z-30 group/handle ${
-                      isDark ? 'bg-black/30 hover:bg-indigo-600' : 'bg-slate-200 hover:bg-indigo-600'
-                    }`}
+                    className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-[#00e5be] flex items-center justify-center z-30 group/handle bg-black/30"
                     title="Drag to trim Out-Point"
                   >
-                    <div className="w-0.5 h-7 bg-indigo-400 group-hover/handle:bg-white transition-all" />
+                    <div className="w-0.5 h-7 bg-[#00e5be] group-hover/handle:bg-white transition-all" />
                   </div>
                 </div>
               );
@@ -687,15 +645,15 @@ export default function AudioWaveformTimeline({
 
           {/* ── Playhead Scrub Needle (Hardware-Accelerated 60FPS Pivot Motion) ── */}
           <div 
-            className="absolute top-0 bottom-0 left-0 w-0.5 bg-amber-500 z-40 pointer-events-none shadow-[0_0_8px_rgba(245,158,11,1)] will-change-transform"
+            className="absolute top-0 bottom-0 left-0 w-0.5 bg-[#00e5be] z-40 pointer-events-none shadow-[0_0_8px_rgba(0,229,190,0.9)] will-change-transform"
             style={{ 
               transform: `translate3d(${currentTime * zoomLevel}px, 0, 0)`,
               transition: 'none'
             }}
           >
             {/* Playhead Diamond Head */}
-            <div className="w-3 h-3 bg-amber-500 transform -translate-x-1.5 -translate-y-1 rotate-45 border border-amber-300 shadow-md" />
-            <div className="bg-amber-500 text-black text-[9px] font-mono font-bold px-1 rounded-xs absolute top-2.5 -left-4 shadow-sm">
+            <div className="w-3 h-3 bg-[#00e5be] transform -translate-x-1.5 -translate-y-1 rotate-45 border border-[#00e5ff] shadow-md" />
+            <div className="bg-[#00e5be] text-black text-[9px] font-mono font-bold px-1 rounded-xs absolute top-2.5 -left-4 shadow-sm">
               {formatTime(currentTime)}
             </div>
           </div>
@@ -705,10 +663,10 @@ export default function AudioWaveformTimeline({
       {/* Live Dragging Tooltip HUD */}
       {dragTooltip && (
         <div 
-          className="fixed bg-slate-900/95 border border-indigo-500 text-white text-[11px] font-mono px-3 py-1.5 rounded-lg shadow-2xl pointer-events-none z-50 flex items-center gap-2"
+          className="fixed bg-[#181920]/95 border border-[#00e5be] text-white text-[11px] font-mono px-3 py-1.5 rounded-lg shadow-2xl pointer-events-none z-50 flex items-center gap-2"
           style={{ left: `${dragTooltip.x + 12}px`, top: `${dragTooltip.y}px` }}
         >
-          <span className="text-emerald-400 font-bold">{dragTooltip.timeStr}</span>
+          <span className="text-[#00e5be] font-bold">{dragTooltip.timeStr}</span>
           <span className="text-slate-400">({dragTooltip.durStr})</span>
         </div>
       )}

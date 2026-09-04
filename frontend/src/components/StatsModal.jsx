@@ -1,4 +1,4 @@
-﻿import React, { useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { X, BarChart2, Clock, Users, Type, ShieldCheck, Activity } from 'lucide-react';
 
 export default function StatsModal({ isOpen, onClose, segments, audioInfo, filename, complianceScore }) {
@@ -59,22 +59,22 @@ export default function StatsModal({ isOpen, onClose, segments, audioInfo, filen
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
-      <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-2xl p-6 shadow-2xl flex flex-col max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+      <div className="bg-[#14151a] border border-[#262734] rounded-2xl w-full max-w-2xl p-6 shadow-2xl flex flex-col max-h-[90vh] overflow-y-auto text-slate-200 custom-scrollbar">
         {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
+        <div className="flex items-center justify-between pb-4 border-b border-[#262734] mb-5">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-2xl">
+            <div className="p-2.5 bg-[#1c1d25] text-[#00e5be] border border-[#262734] rounded-xl shadow-xs">
               <BarChart2 className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-slate-900">Transcript Analytics & Statistics</h2>
-              <p className="text-xs text-slate-500 font-medium">{filename || 'Audio Transcription'}</p>
+              <h2 className="text-lg font-bold text-white tracking-tight">Transcript Analytics & Statistics</h2>
+              <p className="text-xs text-slate-400 font-medium">{filename || 'Audio Transcription'}</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-700 rounded-xl bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer"
+            className="p-1.5 text-slate-400 hover:text-white rounded-xl bg-[#181920] hover:bg-[#22232c] border border-[#262734] transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -84,47 +84,47 @@ export default function StatsModal({ isOpen, onClose, segments, audioInfo, filen
           <div className="space-y-5">
             {/* Top Metric Cards */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
-                <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-semibold mb-1">
-                  <Clock className="w-3.5 h-3.5 text-indigo-600" />
+              <div className="p-3.5 bg-[#181920] border border-[#262734] rounded-xl">
+                <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-semibold mb-1">
+                  <Clock className="w-3.5 h-3.5 text-[#00e5be]" />
                   <span>Duration</span>
                 </div>
-                <div className="text-base font-black text-slate-800">{stats.totalDuration.toFixed(1)}s</div>
-                <div className="text-[10px] text-slate-400 mt-0.5">{stats.speechPercent.toFixed(0)}% speech ratio</div>
+                <div className="text-base font-black text-white">{stats.totalDuration.toFixed(1)}s</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">{stats.speechPercent.toFixed(0)}% speech ratio</div>
               </div>
 
-              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
-                <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-semibold mb-1">
-                  <Type className="w-3.5 h-3.5 text-emerald-600" />
+              <div className="p-3.5 bg-[#181920] border border-[#262734] rounded-xl">
+                <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-semibold mb-1">
+                  <Type className="w-3.5 h-3.5 text-[#00e5ff]" />
                   <span>Total Words</span>
                 </div>
-                <div className="text-base font-black text-slate-800">{stats.totalWords}</div>
-                <div className="text-[10px] text-slate-400 mt-0.5">{stats.uniqueWords} unique tokens</div>
+                <div className="text-base font-black text-white">{stats.totalWords}</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">{stats.uniqueWords} unique tokens</div>
               </div>
 
-              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
-                <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-semibold mb-1">
-                  <Activity className="w-3.5 h-3.5 text-amber-600" />
+              <div className="p-3.5 bg-[#181920] border border-[#262734] rounded-xl">
+                <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-semibold mb-1">
+                  <Activity className="w-3.5 h-3.5 text-amber-400" />
                   <span>Pace (WPM)</span>
                 </div>
-                <div className="text-base font-black text-slate-800">{stats.wpm}</div>
-                <div className="text-[10px] text-slate-400 mt-0.5">words per minute</div>
+                <div className="text-base font-black text-white">{stats.wpm}</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">words per minute</div>
               </div>
 
-              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
-                <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-semibold mb-1">
-                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+              <div className="p-3.5 bg-[#181920] border border-[#262734] rounded-xl">
+                <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-semibold mb-1">
+                  <ShieldCheck className="w-3.5 h-3.5 text-[#00e5be]" />
                   <span>Compliance</span>
                 </div>
-                <div className="text-base font-black text-slate-800">{complianceScore || 100}%</div>
-                <div className="text-[10px] text-slate-400 mt-0.5">{stats.avgConfidence.toFixed(0)}% avg acoustic conf</div>
+                <div className="text-base font-black text-[#00e5be]">{complianceScore || 100}%</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">{stats.avgConfidence.toFixed(0)}% avg acoustic conf</div>
               </div>
             </div>
 
             {/* Speaker Breakdown Section */}
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                <Users className="w-3.5 h-3.5 text-indigo-600" />
+            <div className="bg-[#181920] p-4 rounded-xl border border-[#262734]">
+              <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5 text-[#00e5be]" />
                 <span>Speaker Diarization Distribution</span>
               </h3>
 
@@ -137,17 +137,17 @@ export default function StatsModal({ isOpen, onClose, segments, audioInfo, filen
                   return (
                     <div key={speaker} className="space-y-1.5">
                       <div className="flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2 font-bold text-slate-800">
-                          <span className={`w-2.5 h-2.5 rounded-full ${isSpk1 ? 'bg-indigo-600' : 'bg-emerald-600'}`} />
+                        <div className="flex items-center gap-2 font-bold text-slate-200">
+                          <span className={`w-2.5 h-2.5 rounded-full ${isSpk1 ? 'bg-[#00e5be] shadow-[0_0_8px_rgba(0,229,190,0.5)]' : 'bg-[#00e5ff] shadow-[0_0_8px_rgba(0,229,255,0.5)]'}`} />
                           <span>{speaker}</span>
                         </div>
-                        <div className="text-slate-500 font-mono text-[11px]">
-                          <span className="font-bold text-slate-700">{dur.toFixed(1)}s</span> ({percent.toFixed(0)}%) • <span className="font-bold text-slate-700">{words}</span> words
+                        <div className="text-slate-400 font-mono text-[11px]">
+                          <span className="font-bold text-white">{dur.toFixed(1)}s</span> ({percent.toFixed(0)}%) • <span className="font-bold text-white">{words}</span> words
                         </div>
                       </div>
-                      <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                      <div className="w-full bg-[#0e0f12] h-2 rounded-full overflow-hidden border border-[#262734]/50">
                         <div
-                          className={`h-full rounded-full transition-all ${isSpk1 ? 'bg-indigo-600' : 'bg-emerald-600'}`}
+                          className={`h-full rounded-full transition-all ${isSpk1 ? 'bg-[#00e5be]' : 'bg-[#00e5ff]'}`}
                           style={{ width: `${percent}%` }}
                         />
                       </div>
@@ -159,36 +159,36 @@ export default function StatsModal({ isOpen, onClose, segments, audioInfo, filen
 
             {/* Audio Info Breakdown */}
             {audioInfo && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono bg-white p-3 rounded-2xl border border-slate-200">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono bg-[#0e0f12] p-3 rounded-xl border border-[#262734]">
                 <div>
-                  <span className="text-[10px] text-slate-400 block font-sans">Sample Rate</span>
-                  <span className="font-bold text-slate-700">{audioInfo.sample_rate || 16000} Hz</span>
+                  <span className="text-[10px] text-slate-500 block font-sans">Sample Rate</span>
+                  <span className="font-bold text-slate-300">{audioInfo.sample_rate || 16000} Hz</span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-400 block font-sans">Channels</span>
-                  <span className="font-bold text-slate-700">{audioInfo.channels || 1} ({audioInfo.channels === 2 ? 'Stereo' : 'Mono'})</span>
+                  <span className="text-[10px] text-slate-500 block font-sans">Channels</span>
+                  <span className="font-bold text-slate-300">{audioInfo.channels || 1} ({audioInfo.channels === 2 ? 'Stereo' : 'Mono'})</span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-400 block font-sans">Loudness (RMS)</span>
-                  <span className="font-bold text-slate-700">{audioInfo.rms_db ? `${audioInfo.rms_db.toFixed(1)} dBFS` : '-20 dBFS'}</span>
+                  <span className="text-[10px] text-slate-500 block font-sans">Loudness (RMS)</span>
+                  <span className="font-bold text-[#00e5be]">{audioInfo.rms_db ? `${audioInfo.rms_db.toFixed(1)} dBFS` : '-20 dBFS'}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-400 block font-sans">Est. SNR</span>
-                  <span className="font-bold text-slate-700">{audioInfo.snr_db ? `${audioInfo.snr_db.toFixed(1)} dB` : '25 dB'}</span>
+                  <span className="text-[10px] text-slate-500 block font-sans">Est. SNR</span>
+                  <span className="font-bold text-[#00e5ff]">{audioInfo.snr_db ? `${audioInfo.snr_db.toFixed(1)} dB` : '25 dB'}</span>
                 </div>
               </div>
             )}
           </div>
         ) : (
-          <div className="py-12 text-center text-slate-400 text-xs">
+          <div className="py-12 text-center text-slate-500 text-xs">
             No active segments to compute statistics.
           </div>
         )}
 
-        <div className="mt-5 pt-3 border-t border-slate-100 flex justify-end">
+        <div className="mt-5 pt-3 border-t border-[#262734] flex justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+            className="px-4 py-2 bg-[#00e5be] hover:bg-[#00c8a5] text-black rounded-xl text-xs font-bold transition-all shadow-[0_0_15px_rgba(0,229,190,0.2)] cursor-pointer"
           >
             Close
           </button>

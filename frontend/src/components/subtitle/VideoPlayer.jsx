@@ -13,11 +13,14 @@ export default function VideoPlayer({
   onTimeUpdate = () => {},
   frameRate = 24,
   theme = 'dark', // 'dark' | 'light'
+  isAudio = false,
 }) {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
   const loopRef = useRef(null);
   const animFrameRef = useRef(null);
+
+  const isAudioMode = isAudio || /\.(mp3|wav|m4a|aac|flac|ogg|opus|wma)(\?.*)?$/i.test(videoUrl || '');
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -297,10 +300,23 @@ export default function VideoPlayer({
           });
 
           return (
-            <div key={i} className={`inline-block mx-auto ${isDual ? 'text-amber-100 font-medium' : 'text-white font-medium'}`}>
-              <span className="bg-black/40 px-2 py-0.5 rounded box-decoration-clone">
-                {renderedParts}
-              </span>
+            <div 
+              key={i} 
+              className={`inline-block mx-auto relative ${
+                isCurrentActive 
+                  ? 'border-2 border-[#00e5ff] bg-black/60 rounded px-2.5 py-0.5 shadow-[0_0_12px_rgba(0,229,255,0.4)]' 
+                  : 'bg-black/50 px-2 py-0.5 rounded'
+              } ${isDual ? 'text-amber-100 font-medium' : 'text-white font-medium'}`}
+            >
+              {isCurrentActive && (
+                <>
+                  <div className="absolute -top-1 -left-1 w-2 h-2 rounded-full bg-[#00e5ff]" />
+                  <div className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[#00e5ff]" />
+                  <div className="absolute -bottom-1 -left-1 w-2 h-2 rounded-full bg-[#00e5ff]" />
+                  <div className="absolute -bottom-1 -right-1 w-2 h-2 rounded-full bg-[#00e5ff]" />
+                </>
+              )}
+              {renderedParts}
             </div>
           );
         })}
@@ -315,20 +331,13 @@ export default function VideoPlayer({
     <div 
       ref={containerRef}
       tabIndex={0}
-      className={`relative rounded-2xl overflow-hidden shadow-sm flex flex-col group focus:outline-none border w-full h-full transition-colors ${
-        isDark ? 'bg-[#0d0f15] border-[#232838]' : 'bg-white border-slate-200'
-      }`}
+      className="relative rounded-lg overflow-hidden shadow-sm flex flex-col group focus:outline-none border w-full h-full transition-colors bg-[#0e0f12] border-[#262734]"
     >
-      {/* Top Monitor Header HUD */}
-      <div className={`px-3 py-1.5 border-b flex items-center justify-between text-xs shrink-0 z-20 transition-colors ${
-        isDark ? 'bg-[#141824]/90 backdrop-blur border-[#232838] text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-700'
-      }`}>
+      {/* Top Monitor Header HUD (CapCut Style) */}
+      <div className="px-3 py-1 border-b flex items-center justify-between text-xs shrink-0 z-20 transition-colors bg-[#14151a] border-[#262734] text-slate-300">
         <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span className="font-bold text-[11px] uppercase tracking-wider font-mono">PROGRAM MONITOR</span>
-          <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded border ${
-            isDark ? 'text-slate-400 bg-[#1c2233] border-[#2d354d]' : 'text-slate-600 bg-white border-slate-300'
-          }`}>
+          <span className="font-bold text-xs uppercase tracking-wider font-sans text-slate-200">Player</span>
+          <span className="font-mono text-[10px] px-1.5 py-0.2 rounded border text-slate-400 bg-[#181920] border-[#262734]">
             {frameRate} FPS
           </span>
         </div>
@@ -339,8 +348,8 @@ export default function VideoPlayer({
             onClick={() => setShowTitleSafe(!showTitleSafe)}
             className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer flex items-center gap-1 ${
               showTitleSafe 
-                ? 'bg-indigo-600/30 border-indigo-500 text-indigo-300' 
-                : isDark ? 'bg-[#181d2c] border-[#2c344a] text-slate-400 hover:text-white' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                ? 'bg-[#00e5be]/20 border-[#00e5be] text-[#00e5be]' 
+                : 'bg-[#181920] border-[#262734] text-slate-400 hover:text-white'
             }`}
             title="Toggle Netflix 90% Title-Safe Box"
           >
@@ -350,50 +359,91 @@ export default function VideoPlayer({
 
           <button
             onClick={() => setSubtitlePosition(subtitlePosition === 'bottom' ? 'top' : 'bottom')}
-            className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer ${
-              isDark ? 'bg-[#181d2c] border-[#2c344a] text-slate-400 hover:text-white' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
-            }`}
+            className="px-2 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer bg-[#181920] border-[#262734] text-slate-400 hover:text-white"
             title="Toggle Subtitle Top/Bottom Screen Position"
           >
             Pos: {subtitlePosition === 'bottom' ? 'Bottom 80%' : 'Top 20%'}
           </button>
 
-          <div className={`flex items-center gap-1 border rounded px-1.5 py-0.5 ${
-            isDark ? 'bg-[#181d2c] border-[#2c344a]' : 'bg-white border-slate-300'
-          }`}>
+          <div className="flex items-center gap-1 border rounded px-1.5 py-0.5 bg-[#181920] border-[#262734]">
             <span className="text-[10px] opacity-60">Size:</span>
-            <button onClick={() => setSubtitleFontSize(Math.max(16, subtitleFontSize - 2))} className="opacity-70 hover:opacity-100 text-xs px-0.5 font-bold">-</button>
-            <span className="text-[10px] font-mono font-bold">{subtitleFontSize}px</span>
-            <button onClick={() => setSubtitleFontSize(Math.min(36, subtitleFontSize + 2))} className="opacity-70 hover:opacity-100 text-xs px-0.5 font-bold">+</button>
+            <button onClick={() => setSubtitleFontSize(Math.max(16, subtitleFontSize - 2))} className="opacity-70 hover:opacity-100 text-xs px-0.5 font-bold cursor-pointer">-</button>
+            <span className="text-[10px] font-mono font-bold text-[#00e5be]">{subtitleFontSize}px</span>
+            <button onClick={() => setSubtitleFontSize(Math.min(36, subtitleFontSize + 2))} className="opacity-70 hover:opacity-100 text-xs px-0.5 font-bold cursor-pointer">+</button>
           </div>
         </div>
       </div>
 
-      {/* Center Video Stage */}
+      {/* Center Video / Audio Stage */}
       <div className="relative w-full flex-grow flex items-center justify-center bg-black min-h-[220px] overflow-hidden select-none">
         {videoUrl ? (
-          <video
-            ref={videoRef}
-            src={videoUrl}
-            className="w-full h-full object-contain cursor-pointer"
-            onClick={togglePlay}
-            onTimeUpdate={handleTimeUpdate}
-            onLoadedMetadata={handleLoadedMetadata}
-            onPlay={() => setIsPlaying(true)}
-            onPause={() => setIsPlaying(false)}
-            onEnded={() => { setIsPlaying(false); loopRef.current = null; }}
-            onVolumeChange={(e) => {
-              setIsMuted(e.target.muted);
-              setVolume(e.target.volume);
-            }}
-          />
+          <>
+            <video
+              ref={videoRef}
+              src={videoUrl}
+              className={isAudioMode ? "hidden" : "w-full h-full object-contain cursor-pointer"}
+              onClick={togglePlay}
+              onTimeUpdate={handleTimeUpdate}
+              onLoadedMetadata={handleLoadedMetadata}
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+              onEnded={() => { setIsPlaying(false); loopRef.current = null; }}
+              onVolumeChange={(e) => {
+                setIsMuted(e.target.muted);
+                setVolume(e.target.volume);
+              }}
+            />
+
+            {/* Dedicated Pro Studio Audio Deck & Equalizer Spectrum */}
+            {isAudioMode && (
+              <div 
+                onClick={togglePlay}
+                className="w-full h-full flex flex-col items-center justify-center cursor-pointer bg-radial from-[#13151f] via-[#0d0e14] to-[#08080c] select-none p-6 relative overflow-hidden"
+              >
+                {/* Background Ambient Glow */}
+                <div className={`absolute w-72 h-72 rounded-full blur-3xl pointer-events-none transition-all duration-500 ${
+                  isPlaying ? 'bg-[#00e5ff]/10 scale-110' : 'bg-slate-800/10 scale-90'
+                }`} />
+
+                {/* Animated Spectrum Waveform Bars */}
+                <div className="flex items-end gap-1.5 h-24 mb-6 px-5 py-3 rounded-2xl bg-[#12141c]/90 border border-[#232736] shadow-2xl backdrop-blur-sm z-0">
+                  {[...Array(24)].map((_, idx) => {
+                    const baseHeight = 15 + Math.sin(idx * 0.45) * 12;
+                    const animatedHeight = isPlaying 
+                      ? Math.max(12, Math.min(95, Math.sin((currentTime * 7) + (idx * 0.6)) * 40 + baseHeight + 25))
+                      : Math.max(8, baseHeight);
+                    return (
+                      <div
+                        key={idx}
+                        className="w-1.5 rounded-full transition-all duration-75"
+                        style={{
+                          height: `${animatedHeight}%`,
+                          backgroundColor: isPlaying ? '#00e5ff' : '#475569',
+                          boxShadow: isPlaying ? '0 0 10px rgba(0,229,255,0.45)' : 'none',
+                          opacity: isPlaying ? 0.75 + (Math.sin(idx + currentTime * 4) * 0.25) : 0.4,
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+
+                {/* Audio Master Badge */}
+                <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-[#151722] border border-[#252838] text-[11px] font-mono text-cyan-300 shadow-sm z-0">
+                  <Volume2 className={`w-3.5 h-3.5 ${isPlaying ? 'text-[#00e5ff] animate-pulse' : 'text-slate-500'}`} />
+                  <span className="font-bold tracking-wider">AUDIO MONITOR</span>
+                  <span className="text-slate-600">|</span>
+                  <span className="text-slate-400 font-sans">STEREO PCM</span>
+                </div>
+              </div>
+            )}
+          </>
         ) : (
           <div className="flex flex-col items-center justify-center text-slate-500 gap-2 p-6 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-[#171b26] border border-[#272e42] flex items-center justify-center text-slate-400">
+            <div className="w-12 h-12 rounded-xl bg-[#14151a] border border-[#262734] flex items-center justify-center text-[#00e5be]">
               <Play className="w-5 h-5 ml-0.5" />
             </div>
-            <p className="text-xs font-semibold text-slate-400">No Video Loaded</p>
-            <p className="text-[11px] text-slate-600 max-w-xs">Select or drop a video from the top bar to preview real-time Netflix subtitle overlays.</p>
+            <p className="text-xs font-semibold text-slate-300">No Media Loaded</p>
+            <p className="text-[11px] text-slate-500 max-w-xs">Select or drop a video or audio file from the top bar to preview real-time subtitle overlays.</p>
           </div>
         )}
 
@@ -401,8 +451,8 @@ export default function VideoPlayer({
         {showTitleSafe && (
           <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
             {/* 90% Action Safe */}
-            <div className="w-[90%] h-[90%] border border-cyan-500/30 border-dashed rounded flex items-center justify-center relative">
-              <span className="absolute top-1 left-1.5 text-[8px] font-mono text-cyan-400/60 bg-black/50 px-1 rounded">
+            <div className="w-[90%] h-[90%] border border-[#00e5be]/30 border-dashed rounded flex items-center justify-center relative">
+              <span className="absolute top-1 left-1.5 text-[8px] font-mono text-[#00e5be]/60 bg-black/50 px-1 rounded">
                 90% ACTION SAFE
               </span>
               {/* 80% Title Safe */}
@@ -426,7 +476,7 @@ export default function VideoPlayer({
 
         {/* Loop Banner */}
         {loopRef.current && (
-          <div className="absolute top-3 left-3 bg-indigo-600/90 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-md z-20 backdrop-blur-xs">
+          <div className="absolute top-3 left-3 bg-[#00e5be]/90 text-black text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-md z-20 backdrop-blur-xs">
             <Repeat className="w-3 h-3 animate-spin" />
             <span>LOOPING #{activeEventId}</span>
           </div>
@@ -434,27 +484,21 @@ export default function VideoPlayer({
       </div>
 
       {/* Pro Transport & Scrub Bar */}
-      <div className={`p-2.5 flex flex-col gap-2 relative z-20 shrink-0 border-t transition-colors ${
-        isDark ? 'bg-[#121622] text-white border-[#232838]' : 'bg-slate-50 text-slate-800 border-slate-200'
-      }`}>
+      <div className="p-2 flex flex-col gap-1.5 relative z-20 shrink-0 border-t transition-colors bg-[#14151a] text-white border-[#262734]">
         {/* Scrubber Progress Bar */}
         <div 
-          className={`w-full h-2 cursor-pointer relative rounded-full hover:h-2.5 transition-all duration-150 group/progress overflow-hidden ${
-            isDark ? 'bg-[#22283a]' : 'bg-slate-200'
-          }`}
+          className="w-full h-1.5 cursor-pointer relative rounded-full hover:h-2 transition-all duration-150 group/progress overflow-hidden bg-[#181920]"
           onClick={handleProgressClick}
           onMouseMove={handleProgressMouseMove}
           onMouseLeave={() => setHoverTime(null)}
         >
           <div 
-            className="h-full bg-gradient-to-r from-indigo-500 to-emerald-400 rounded-full pointer-events-none transition-all duration-75"
+            className="h-full bg-gradient-to-r from-[#00e5be] via-[#00c9a7] to-[#00b4d8] shadow-[0_0_8px_rgba(0,229,190,0.5)] rounded-full pointer-events-none transition-all duration-75"
             style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
           />
           {hoverTime !== null && (
             <div 
-              className={`absolute -top-7 border text-[10px] font-mono px-2 py-0.5 rounded shadow-lg pointer-events-none transform -translate-x-1/2 whitespace-nowrap hidden group-hover/progress:block z-30 ${
-                isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-white border-slate-300 text-slate-800'
-              }`}
+              className="absolute -top-7 border text-[10px] font-mono px-2 py-0.5 rounded shadow-lg pointer-events-none transform -translate-x-1/2 whitespace-nowrap hidden group-hover/progress:block z-30 bg-[#181920] border-[#262734] text-slate-200"
               style={{ left: `${hoverPosition}px` }}
             >
               {formatSMPTE(hoverTime)}
@@ -462,56 +506,50 @@ export default function VideoPlayer({
           )}
         </div>
 
-        {/* Controls Deck */}
+        {/* Controls Deck (CapCut Style) */}
         <div className="flex items-center justify-between">
           {/* Left: Playback Controls */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button 
               onClick={togglePlay} 
-              className="w-8 h-8 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center transition-transform active:scale-95 shadow-md cursor-pointer"
+              className="w-7 h-7 rounded-full bg-[#00e5be] hover:bg-[#00c9a7] text-black flex items-center justify-center transition-transform active:scale-95 shadow-[0_0_12px_rgba(0,229,190,0.25)] cursor-pointer"
               title="Play / Pause (Space)"
             >
-              {isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" className="ml-0.5" />}
+              {isPlaying ? <Pause size={13} fill="currentColor" /> : <Play size={13} fill="currentColor" className="ml-0.5" />}
             </button>
             
-            <div className={`flex items-center gap-1 p-1 rounded-xl border ${
-              isDark ? 'text-slate-300 bg-[#191e2e] border-[#262e44]' : 'text-slate-700 bg-white border-slate-300'
-            }`}>
-              <button onClick={() => { if (videoRef.current) videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 2); }} title="Rewind 2s (Left Arrow)" className={`p-1 rounded-lg transition-colors cursor-pointer ${isDark ? 'hover:text-white hover:bg-[#252c42]' : 'hover:bg-slate-100'}`}>
-                <SkipBack size={14} />
+            <div className="flex items-center gap-0.5 p-0.5 rounded border text-slate-300 bg-[#181920] border-[#262734]">
+              <button onClick={() => { if (videoRef.current) videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 2); }} title="Rewind 2s (Left Arrow)" className="p-1 rounded transition-colors cursor-pointer hover:text-white hover:bg-[#22232c]">
+                <SkipBack size={12} />
               </button>
-              <button onClick={() => { if (videoRef.current) videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - (1/frameRate)); }} title="Step Back 1 Frame (,)" className={`p-1 rounded-lg transition-colors cursor-pointer ${isDark ? 'hover:text-white hover:bg-[#252c42]' : 'hover:bg-slate-100'}`}>
-                <StepBack size={14} />
+              <button onClick={() => { if (videoRef.current) videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - (1/frameRate)); }} title="Step Back 1 Frame (,)" className="p-1 rounded transition-colors cursor-pointer hover:text-white hover:bg-[#22232c]">
+                <StepBack size={12} />
               </button>
-              <button onClick={() => { if (videoRef.current) videoRef.current.currentTime = Math.min(duration, videoRef.current.currentTime + (1/frameRate)); }} title="Step Forward 1 Frame (.)" className={`p-1 rounded-lg transition-colors cursor-pointer ${isDark ? 'hover:text-white hover:bg-[#252c42]' : 'hover:bg-slate-100'}`}>
-                <StepForward size={14} />
+              <button onClick={() => { if (videoRef.current) videoRef.current.currentTime = Math.min(duration, videoRef.current.currentTime + (1/frameRate)); }} title="Step Forward 1 Frame (.)" className="p-1 rounded transition-colors cursor-pointer hover:text-white hover:bg-[#22232c]">
+                <StepForward size={12} />
               </button>
-              <button onClick={() => { if (videoRef.current) videoRef.current.currentTime = Math.min(duration, videoRef.current.currentTime + 2); }} title="Forward 2s (Right Arrow)" className={`p-1 rounded-lg transition-colors cursor-pointer ${isDark ? 'hover:text-white hover:bg-[#252c42]' : 'hover:bg-slate-100'}`}>
-                <SkipForward size={14} />
+              <button onClick={() => { if (videoRef.current) videoRef.current.currentTime = Math.min(duration, videoRef.current.currentTime + 2); }} title="Forward 2s (Right Arrow)" className="p-1 rounded transition-colors cursor-pointer hover:text-white hover:bg-[#22232c]">
+                <SkipForward size={12} />
               </button>
             </div>
 
-            {/* SMPTE & Milliseconds Timecode Readout */}
-            <div className={`flex items-center gap-2 px-2.5 py-1 rounded-xl border font-mono text-xs ${
-              isDark ? 'bg-[#171c2b] border-[#262e44]' : 'bg-white border-slate-300'
-            }`}>
-              <span className={`font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>{formatSMPTE(currentTime)}</span>
+            {/* Neon Turquoise / Cyan Monospace Timecode Readout */}
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded border font-mono text-xs bg-[#181920] border-[#262734]">
+              <span className="font-bold text-[#00e5be]">{formatSMPTE(currentTime)}</span>
               <span className="opacity-40 text-[10px]">/</span>
-              <span className="opacity-75 text-[11px]">{formatSMPTE(duration)}</span>
+              <span className="opacity-75 text-[11px] text-slate-400">{formatSMPTE(duration)}</span>
             </div>
           </div>
 
           {/* Right: VU Meter, Rate, Volume, Fullscreen */}
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2">
             {/* Audio VU Meter */}
-            <div className={`flex items-center gap-1 px-2 py-1 rounded-xl border ${
-              isDark ? 'bg-[#171c2b] border-[#262e44]' : 'bg-white border-slate-300'
-            }`} title="Audio Peak Level">
-              <Volume1 className="w-3.5 h-3.5 opacity-60" />
-              <div className={`w-12 h-2 rounded-full overflow-hidden flex gap-0.5 p-0.5 ${isDark ? 'bg-[#252c42]' : 'bg-slate-200'}`}>
+            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded border bg-[#181920] border-[#262734]" title="Audio Peak Level">
+              <Volume1 className="w-3.5 h-3.5 opacity-60 text-slate-400" />
+              <div className="w-10 h-1.5 rounded-full overflow-hidden flex gap-0.5 p-0.5 bg-[#22232c]">
                 <div 
                   className={`h-full rounded-full transition-all duration-75 ${
-                    audioLevel > 0.8 ? 'bg-rose-500' : audioLevel > 0.5 ? 'bg-amber-400' : 'bg-emerald-400'
+                    audioLevel > 0.8 ? 'bg-rose-500' : audioLevel > 0.5 ? 'bg-amber-400' : 'bg-[#00e5be]'
                   }`}
                   style={{ width: `${Math.min(100, audioLevel * 100)}%` }}
                 />
@@ -521,20 +559,16 @@ export default function VideoPlayer({
             {/* Playback Speed */}
             <button 
               onClick={cyclePlaybackRate} 
-              className={`text-[11px] font-bold border px-2 py-1 rounded-lg text-center transition-colors cursor-pointer ${
-                isDark ? 'text-slate-200 hover:text-white bg-[#191e2e] border-[#262e44]' : 'text-slate-700 bg-white hover:bg-slate-100 border-slate-300'
-              }`}
+              className="text-[10px] font-bold border px-1.5 py-0.5 rounded text-center transition-colors cursor-pointer text-slate-200 hover:text-white bg-[#181920] border-[#262734] hover:bg-[#22232c]"
               title="Cycle Speed"
             >
               {playbackRate}x
             </button>
 
             {/* Volume Control */}
-            <div className={`flex items-center gap-1.5 border px-2 py-1 rounded-xl ${
-              isDark ? 'bg-[#191e2e] border-[#262e44]' : 'bg-white border-slate-300'
-            }`}>
+            <div className="flex items-center gap-1 border px-1.5 py-0.5 rounded bg-[#181920] border-[#262734]">
               <button onClick={() => { if (videoRef.current) { const m = !isMuted; setIsMuted(m); videoRef.current.muted = m; } }} className="cursor-pointer">
-                {isMuted || volume === 0 ? <VolumeX size={14} className="text-rose-400" /> : <Volume2 size={14} />}
+                {isMuted || volume === 0 ? <VolumeX size={13} className="text-rose-400" /> : <Volume2 size={13} className="text-slate-300" />}
               </button>
               <input 
                 type="range" 
@@ -549,19 +583,17 @@ export default function VideoPlayer({
                     videoRef.current.muted = v === 0;
                   }
                 }}
-                className="w-14 h-1 bg-slate-400 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                className="w-12 h-1 bg-slate-600 rounded appearance-none cursor-pointer accent-[#00e5be]"
               />
             </div>
 
             {/* Fullscreen */}
             <button 
               onClick={toggleFullscreen} 
-              className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
-                isDark ? 'bg-[#191e2e] border-[#262e44] text-slate-300 hover:text-white' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
-              }`}
+              className="p-1 rounded border transition-colors cursor-pointer bg-[#181920] border-[#262734] text-slate-300 hover:text-white hover:bg-[#22232c]"
               title="Fullscreen"
             >
-              {isFullscreen ? <Minimize size={14} /> : <Maximize size={14} />}
+              {isFullscreen ? <Minimize size={13} /> : <Maximize size={13} />}
             </button>
           </div>
         </div>

@@ -124,31 +124,31 @@ export default function SubtitleDiffModal({ isOpen, onClose, originalEvents = []
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4" onClick={onClose}>
-      <div className="bg-[#141824] border border-[#2a344a] rounded-3xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden text-slate-200" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4" onClick={onClose}>
+      <div className="bg-[#14151a] border border-[#262734] rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden text-slate-200" onClick={e => e.stopPropagation()}>
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#232a3d]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#262734]">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-950/80 border border-emerald-700/60 flex items-center justify-center">
-              <Diff className="w-5 h-5 text-emerald-400" />
+            <div className="w-10 h-10 rounded-xl bg-[#00e5be]/15 border border-[#00e5be]/30 flex items-center justify-center">
+              <Diff className="w-5 h-5 text-[#00e5be]" />
             </div>
             <div>
               <h2 className="text-base font-bold text-white uppercase tracking-wider">Netflix Auto-Fix Diff Preview</h2>
               <p className="text-xs text-slate-400">{totalChanges} subtitle event{totalChanges !== 1 ? 's' : ''} corrected</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-[#202738] text-slate-400 hover:text-white transition-colors cursor-pointer">
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-[#22232c] text-slate-400 hover:text-white transition-colors cursor-pointer">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Fix Summary Pills */}
         {Object.keys(fixSummary).length > 0 && (
-          <div className="px-6 py-2.5 bg-[#0e121a] border-b border-[#232a3d]">
+          <div className="px-6 py-2.5 bg-[#0e0f12] border-b border-[#262734]">
             <div className="flex flex-wrap gap-1.5">
               {Object.entries(fixSummary).map(([rule, { fixed, remaining }]) => (
-                <span key={rule} className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-800">
-                  <Check className="w-3 h-3 text-emerald-400" />
+                <span key={rule} className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[#00e5be]/15 text-[#00e5be] border border-[#00e5be]/30">
+                  <Check className="w-3 h-3 text-[#00e5be]" />
                   {rule}: {fixed} fixed{remaining > 0 ? `, ${remaining} remain` : ''}
                 </span>
               ))}
@@ -157,12 +157,12 @@ export default function SubtitleDiffModal({ isOpen, onClose, originalEvents = []
         )}
 
         {/* Select All Row */}
-        <div className="px-6 py-2 border-b border-[#232a3d] flex items-center justify-between bg-[#111520]">
+        <div className="px-6 py-2 border-b border-[#262734] flex items-center justify-between bg-[#14151a]">
           <button onClick={toggleAll} className="flex items-center gap-2 text-xs font-semibold text-slate-300 hover:text-white transition-colors cursor-pointer">
             <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
-              allSelected ? 'bg-indigo-600 border-indigo-500' : 'border-slate-600 bg-slate-900'
+              allSelected ? 'bg-[#00e5be] border-[#00e5be] text-black' : 'border-[#262734] bg-[#0e0f12]'
             }`}>
-              {allSelected && <Check className="w-3 h-3 text-white" />}
+              {allSelected && <Check className="w-3 h-3 text-black font-bold" />}
             </div>
             <span>{allSelected ? 'Deselect All' : 'Select All Changes'} ({totalChanges})</span>
           </button>
@@ -172,30 +172,30 @@ export default function SubtitleDiffModal({ isOpen, onClose, originalEvents = []
         <div className="flex-1 overflow-y-auto px-6 py-3 space-y-2.5 custom-scrollbar">
           {changes.length === 0 ? (
             <div className="text-center py-12 text-slate-500">
-              <CheckCheck className="w-10 h-10 mx-auto mb-2 text-emerald-400" />
+              <CheckCheck className="w-10 h-10 mx-auto mb-2 text-[#00e5be]" />
               <p className="text-xs font-bold text-slate-300">No Auto-Fix Adjustments Needed</p>
-              <p className="text-[11px] text-slate-500 mt-0.5">All subtitles currently comply with Netflix timing and formatting rules.</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">All subtitles currently comply with Netflix timing and formatting rules.</p>
             </div>
           ) : (
             changes.map((change) => (
               <div
                 key={change.eventId}
-                className={`rounded-2xl border p-3 transition-all cursor-pointer ${
+                className={`rounded-xl border p-3 transition-all cursor-pointer ${
                   selectedChanges.has(change.eventId)
-                    ? 'border-indigo-500/80 bg-indigo-950/30'
-                    : 'border-[#232a3d] bg-[#0e121a] hover:border-[#2f3952]'
+                    ? 'border-[#00e5be]/70 bg-[#00e5be]/10'
+                    : 'border-[#262734] bg-[#181920] hover:border-[#383a4c]'
                 }`}
                 onClick={() => toggleChange(change.eventId)}
               >
                 <div className="flex items-center gap-2.5 mb-2">
                   <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
                     selectedChanges.has(change.eventId)
-                      ? 'bg-indigo-600 border-indigo-500'
-                      : 'border-slate-600 bg-slate-900'
+                      ? 'bg-[#00e5be] border-[#00e5be] text-black'
+                      : 'border-[#262734] bg-[#0e0f12]'
                   }`}>
-                    {selectedChanges.has(change.eventId) && <Check className="w-3 h-3 text-white" />}
+                    {selectedChanges.has(change.eventId) && <Check className="w-3 h-3 text-black font-bold" />}
                   </div>
-                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-lg bg-indigo-600 text-white text-[10px] font-mono font-black">
+                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-lg bg-[#00e5be] text-black text-[10px] font-mono font-black shadow-xs">
                     #{change.eventId}
                   </span>
                   <span className="text-[11px] font-bold text-slate-300">{change.changes.length} change{change.changes.length > 1 ? 's' : ''}</span>
@@ -209,7 +209,7 @@ export default function SubtitleDiffModal({ isOpen, onClose, originalEvents = []
                         {ch.from || '(empty)'}
                       </div>
                       <ArrowRight className="w-3.5 h-3.5 text-slate-500 shrink-0 mt-2" />
-                      <div className="flex-1 p-2 rounded-xl bg-emerald-950/50 text-emerald-300 text-xs font-mono whitespace-pre-wrap border border-emerald-800/80">
+                      <div className="flex-1 p-2 rounded-xl bg-[#00e5be]/10 text-[#00e5be] text-xs font-mono whitespace-pre-wrap border border-[#00e5be]/30">
                         {ch.to || '(empty)'}
                       </div>
                     </div>
@@ -221,10 +221,10 @@ export default function SubtitleDiffModal({ isOpen, onClose, originalEvents = []
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-[#232a3d] bg-[#111520]">
+        <div className="flex items-center justify-between px-6 py-4 border-t border-[#262734] bg-[#14151a]">
           <button
             onClick={onClose}
-            className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-[#1e2536] transition-colors cursor-pointer flex items-center gap-1.5"
+            className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 bg-[#181920] hover:bg-[#22232c] border border-[#262734] transition-colors cursor-pointer flex items-center gap-1.5"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             Cancel
@@ -232,14 +232,14 @@ export default function SubtitleDiffModal({ isOpen, onClose, originalEvents = []
           <div className="flex items-center gap-2.5">
             <button
               onClick={() => { onAcceptAll(); onClose(); }}
-              className="px-4 py-2 rounded-xl text-xs font-bold text-emerald-300 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-700 transition-colors cursor-pointer"
+              className="px-4 py-2 rounded-xl text-xs font-bold text-[#00e5be] bg-[#181920] hover:bg-[#22232c] border border-[#262734] transition-colors cursor-pointer"
             >
               Accept All ({totalChanges})
             </button>
             <button
               onClick={handleAcceptSelected}
               disabled={selectedChanges.size === 0}
-              className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+              className="px-5 py-2 rounded-xl text-xs font-bold text-black bg-[#00e5be] hover:bg-[#00c9a7] active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-[0_0_12px_rgba(0,229,190,0.25)] flex items-center gap-1.5 cursor-pointer border-none"
             >
               <Check className="w-3.5 h-3.5" />
               Apply Selected ({selectedChanges.size})

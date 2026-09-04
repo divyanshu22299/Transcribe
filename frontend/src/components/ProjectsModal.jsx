@@ -38,17 +38,17 @@ export default function ProjectsModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
-      <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[85vh] shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
+      <div className="bg-[#14151a] rounded-2xl max-w-2xl w-full max-h-[85vh] shadow-2xl border border-[#262734] overflow-hidden flex flex-col text-slate-200">
         {/* Modal Header */}
-        <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50/50">
+        <div className="flex items-center justify-between p-5 border-b border-[#262734] bg-[#14151a]">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-indigo-100 text-indigo-700 rounded-xl">
+            <div className="p-2 bg-[#00e5be]/15 text-[#00e5be] border border-[#00e5be]/30 rounded-xl">
               <Database className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-900">Neon Cloud Projects Library</h2>
-              <p className="text-xs text-slate-500">
+              <h2 className="text-base font-bold text-white">Neon Cloud Projects Library</h2>
+              <p className="text-xs text-slate-400">
                 All audio transcriptions & segments saved in your Neon PostgreSQL database
               </p>
             </div>
@@ -57,14 +57,14 @@ export default function ProjectsModal({
           <div className="flex items-center gap-2">
             <button
               onClick={onRefresh}
-              className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+              className="p-2 text-slate-400 hover:text-white hover:bg-[#22232c] rounded-xl transition-colors cursor-pointer"
               title="Refresh projects list"
             >
               <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
             </button>
             <button
               onClick={onClose}
-              className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+              className="p-2 text-slate-400 hover:text-white hover:bg-[#22232c] rounded-xl transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -72,7 +72,7 @@ export default function ProjectsModal({
         </div>
 
         {/* Search Bar */}
-        <div className="p-4 border-b border-slate-100 bg-white">
+        <div className="p-4 border-b border-[#262734] bg-[#14151a]">
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
@@ -80,30 +80,30 @@ export default function ProjectsModal({
               placeholder="Search by filename, language, or script..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all"
+              className="w-full pl-9 pr-4 py-2 bg-[#0e0f12] border border-[#262734] rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#00e5be] transition-all"
             />
           </div>
         </div>
 
         {/* Projects List */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
           {isLoading ? (
             <div className="text-center py-16 text-slate-400">
-              <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-600" />
-              <p className="text-xs font-semibold">Loading projects from Neon DB...</p>
+              <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-[#00e5be]" />
+              <p className="text-xs font-semibold text-slate-300">Loading projects from Neon DB...</p>
             </div>
           ) : filtered.length === 0 ? (
-            <div className="text-center py-14 px-6 bg-slate-50/70 border border-dashed border-slate-200 rounded-2xl">
-              <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-3">
+            <div className="text-center py-14 px-6 bg-[#181920] border border-dashed border-[#262734] rounded-2xl">
+              <div className="w-12 h-12 rounded-2xl bg-[#00e5be]/15 text-[#00e5be] border border-[#00e5be]/30 flex items-center justify-center mx-auto mb-3">
                 <Database className="w-6 h-6" />
               </div>
-              <p className="text-sm font-bold text-slate-800">No saved projects in Neon DB</p>
-              <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto leading-relaxed">
+              <p className="text-sm font-bold text-white">No saved projects in Neon DB</p>
+              <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto leading-relaxed">
                 Transcribe any audio file or click "Save to Neon DB" to store full transcripts, timestamps, and confidence matrices in your PostgreSQL cloud.
               </p>
               <button
                 onClick={onClose}
-                className="mt-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+                className="mt-4 px-4 py-2 bg-[#00e5be] hover:bg-[#00c9a7] text-black rounded-xl text-xs font-bold transition-all shadow-[0_0_12px_rgba(0,229,190,0.25)] cursor-pointer"
               >
                 Upload New Audio
               </button>
@@ -112,16 +112,16 @@ export default function ProjectsModal({
             filtered.map((proj) => (
               <div
                 key={proj.id}
-                className="group p-4 bg-white hover:bg-indigo-50/30 border border-slate-200 hover:border-indigo-300 rounded-xl transition-all shadow-2xs flex flex-wrap items-center justify-between gap-3"
+                className="group p-4 bg-[#181920] hover:bg-[#22232c] border border-[#262734] hover:border-[#00e5be] rounded-xl transition-all shadow-xs flex flex-wrap items-center justify-between gap-3"
               >
                 <div className="flex items-start gap-3">
-                  <div className="p-2.5 bg-slate-100 text-slate-700 rounded-xl mt-0.5">
+                  <div className="p-2.5 bg-[#14151a] text-[#00e5be] border border-[#262734] rounded-xl mt-0.5">
                     <FileAudio className="w-4 h-4" />
                   </div>
                   <div>
-                    <h3 className="text-xs font-bold text-slate-900 line-clamp-1">{proj.filename}</h3>
-                    <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px] text-slate-500">
-                      <span className="font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">
+                    <h3 className="text-xs font-bold text-white line-clamp-1">{proj.filename}</h3>
+                    <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px] text-slate-400">
+                      <span className="font-semibold text-[#00e5be] bg-[#0e0f12] border border-[#262734] px-2 py-0.5 rounded-md">
                         {proj.language} ({proj.script})
                       </span>
                       <span>•</span>
@@ -140,8 +140,8 @@ export default function ProjectsModal({
                 <div className="flex items-center gap-2">
                   <span className={`text-[11px] font-bold px-2 py-0.5 rounded-lg border ${
                     proj.compliance_score >= 95
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                      : 'bg-amber-50 text-amber-700 border-amber-200'
+                      ? 'bg-[#00e5be]/15 text-[#00e5be] border-[#00e5be]/30'
+                      : 'bg-amber-950/40 text-amber-300 border-amber-800'
                   }`}>
                     {proj.compliance_score.toFixed(0)}% Score
                   </span>
@@ -151,7 +151,7 @@ export default function ProjectsModal({
                       onLoadProject(proj.id);
                       onClose();
                     }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs transition-transform active:scale-95 cursor-pointer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#00e5be] hover:bg-[#00c9a7] text-black rounded-xl text-xs font-bold shadow-[0_0_12px_rgba(0,229,190,0.25)] transition-transform active:scale-95 cursor-pointer"
                   >
                     <span>Open</span>
                     <ArrowRight className="w-3.5 h-3.5" />
@@ -159,7 +159,7 @@ export default function ProjectsModal({
 
                   <button
                     onClick={() => onDeleteProject(proj.id)}
-                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                    className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
                     title="Delete project from Neon DB"
                   >
                     <Trash2 className="w-4 h-4" />

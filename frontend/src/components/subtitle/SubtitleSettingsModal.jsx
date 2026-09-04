@@ -98,28 +98,24 @@ export default function SubtitleSettingsModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
       <div 
-        className={`w-full max-w-2xl rounded-2xl border shadow-2xl overflow-hidden flex flex-col max-h-[90vh] ${
-          isDark ? 'bg-[#121624] border-[#252c3f] text-slate-200' : 'bg-white border-slate-200 text-slate-800'
-        }`}
+        className="w-full max-w-2xl rounded-2xl border border-[#262734] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] bg-[#14151a] text-slate-200"
       >
         {/* Modal Header */}
-        <div className={`p-4 sm:p-5 border-b flex items-center justify-between ${
-          isDark ? 'border-[#202738] bg-[#161c2e]' : 'border-slate-100 bg-slate-50'
-        }`}>
+        <div className="p-4 sm:p-5 border-b border-[#262734] bg-[#14151a] flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
+            <div className="p-2 rounded-xl bg-[#00e5be]/15 text-[#00e5be] border border-[#00e5be]/30">
               <Settings className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold tracking-tight">Subtitle Studio QC & Generation Settings</h2>
+              <h2 className="text-base font-bold tracking-tight text-white">Subtitle Studio QC & Generation Settings</h2>
               <p className="text-xs text-slate-400">Configure reading speeds, character caps, and AI correction rules</p>
             </div>
           </div>
           <button 
             onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-slate-700/30 text-slate-400 hover:text-white transition-colors cursor-pointer"
+            className="p-1.5 rounded-lg hover:bg-[#22232c] text-slate-400 hover:text-white transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -138,13 +134,9 @@ export default function SubtitleSettingsModal({
                 <button
                   key={p.name}
                   onClick={p.apply}
-                  className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
-                    isDark 
-                      ? 'bg-[#181f33] border-[#29344e] hover:border-indigo-500 hover:bg-[#1f2842]' 
-                      : 'bg-slate-50 border-slate-200 hover:border-indigo-400 hover:bg-slate-100'
-                  }`}
+                  className="p-2.5 rounded-xl border border-[#262734] bg-[#181920] hover:border-[#00e5be] hover:bg-[#22232c] text-left transition-all cursor-pointer"
                 >
-                  <div className="font-bold text-xs text-indigo-400">{p.name}</div>
+                  <div className="font-bold text-xs text-[#00e5be]">{p.name}</div>
                   <div className="text-[10px] text-slate-400 mt-0.5">{p.desc}</div>
                 </button>
               ))}
@@ -155,10 +147,10 @@ export default function SubtitleSettingsModal({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             
             {/* Characters Per Line (CPL) */}
-            <div className={`p-4 rounded-xl border ${isDark ? 'bg-[#161c2e] border-[#252c3f]' : 'bg-slate-50 border-slate-200'}`}>
+            <div className="p-4 rounded-xl border bg-[#181920] border-[#262734]">
               <div className="flex items-center justify-between mb-2">
                 <span className="font-bold text-xs">Characters Per Line (CPL)</span>
-                <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-indigo-600 text-white">
+                <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-[#00e5be] text-black shadow-xs">
                   {cplLimit} chars
                 </span>
               </div>
@@ -169,7 +161,7 @@ export default function SubtitleSettingsModal({
                 step="1"
                 value={cplLimit}
                 onChange={e => setCplLimit(parseInt(e.target.value, 10))}
-                className="w-full accent-indigo-500 cursor-pointer"
+                className="w-full accent-[#00e5be] cursor-pointer"
               />
               <div className="flex justify-between text-[10px] text-slate-400 mt-1">
                 <span>28 (Short)</span>
@@ -182,10 +174,10 @@ export default function SubtitleSettingsModal({
             </div>
 
             {/* Reading Speed (CPS) */}
-            <div className={`p-4 rounded-xl border ${isDark ? 'bg-[#161c2e] border-[#252c3f]' : 'bg-slate-50 border-slate-200'}`}>
+            <div className="p-4 rounded-xl border bg-[#181920] border-[#262734]">
               <div className="flex items-center justify-between mb-2">
                 <span className="font-bold text-xs">Reading Speed (CPS)</span>
-                <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-indigo-600 text-white">
+                <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-[#00e5be] text-black shadow-xs">
                   {cpsLimit} CPS
                 </span>
               </div>
@@ -196,7 +188,7 @@ export default function SubtitleSettingsModal({
                 step="0.5"
                 value={cpsLimit}
                 onChange={e => setCpsLimit(parseFloat(e.target.value))}
-                className="w-full accent-indigo-500 cursor-pointer"
+                className="w-full accent-[#00e5be] cursor-pointer"
               />
               <div className="flex justify-between text-[10px] text-slate-400 mt-1">
                 <span>12 (Slow)</span>
@@ -212,15 +204,15 @@ export default function SubtitleSettingsModal({
           {/* Line Count & Duration Limits */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {/* Max Lines */}
-            <div className={`p-3 rounded-xl border ${isDark ? 'bg-[#161c2e] border-[#252c3f]' : 'bg-slate-50 border-slate-200'}`}>
+            <div className="p-3 rounded-xl border bg-[#181920] border-[#262734]">
               <span className="font-bold text-xs block mb-2">Max Lines Per Subtitle</span>
               <div className="grid grid-cols-2 gap-1.5">
                 <button
                   onClick={() => setMaxLines(1)}
                   className={`py-1.5 rounded-lg font-bold text-xs border transition-all cursor-pointer ${
                     maxLines === 1 
-                      ? 'bg-indigo-600 border-indigo-500 text-white' 
-                      : isDark ? 'bg-[#1f2638] text-slate-400 border-transparent' : 'bg-slate-100 text-slate-600'
+                      ? 'bg-[#00e5be] border-[#00e5be] text-black shadow-xs' 
+                      : 'bg-[#14151a] text-slate-400 border-[#262734]'
                   }`}
                 >
                   1 Line
@@ -229,8 +221,8 @@ export default function SubtitleSettingsModal({
                   onClick={() => setMaxLines(2)}
                   className={`py-1.5 rounded-lg font-bold text-xs border transition-all cursor-pointer ${
                     maxLines === 2 
-                      ? 'bg-indigo-600 border-indigo-500 text-white' 
-                      : isDark ? 'bg-[#1f2638] text-slate-400 border-transparent' : 'bg-slate-100 text-slate-600'
+                      ? 'bg-[#00e5be] border-[#00e5be] text-black shadow-xs' 
+                      : 'bg-[#14151a] text-slate-400 border-[#262734]'
                   }`}
                 >
                   2 Lines (Std)
@@ -239,10 +231,10 @@ export default function SubtitleSettingsModal({
             </div>
 
             {/* Min Duration */}
-            <div className={`p-3 rounded-xl border ${isDark ? 'bg-[#161c2e] border-[#252c3f]' : 'bg-slate-50 border-slate-200'}`}>
+            <div className="p-3 rounded-xl border bg-[#181920] border-[#262734]">
               <div className="flex justify-between mb-1">
                 <span className="font-bold text-xs">Min Duration</span>
-                <span className="font-mono font-bold text-indigo-400">{minDuration.toFixed(3)}s</span>
+                <span className="font-mono font-bold text-[#00e5be]">{minDuration.toFixed(3)}s</span>
               </div>
               <input
                 type="range"
@@ -251,16 +243,16 @@ export default function SubtitleSettingsModal({
                 step="0.05"
                 value={minDuration}
                 onChange={e => setMinDuration(parseFloat(e.target.value))}
-                className="w-full accent-indigo-500 cursor-pointer mt-1"
+                className="w-full accent-[#00e5be] cursor-pointer mt-1"
               />
               <span className="text-[10px] text-slate-400 block mt-1">Default 5/6 sec (20 frames)</span>
             </div>
 
             {/* Max Duration */}
-            <div className={`p-3 rounded-xl border ${isDark ? 'bg-[#161c2e] border-[#252c3f]' : 'bg-slate-50 border-slate-200'}`}>
+            <div className="p-3 rounded-xl border bg-[#181920] border-[#262734]">
               <div className="flex justify-between mb-1">
                 <span className="font-bold text-xs">Max Duration</span>
-                <span className="font-mono font-bold text-indigo-400">{maxDuration.toFixed(1)}s</span>
+                <span className="font-mono font-bold text-[#00e5be]">{maxDuration.toFixed(1)}s</span>
               </div>
               <input
                 type="range"
@@ -269,7 +261,7 @@ export default function SubtitleSettingsModal({
                 step="0.5"
                 value={maxDuration}
                 onChange={e => setMaxDuration(parseFloat(e.target.value))}
-                className="w-full accent-indigo-500 cursor-pointer mt-1"
+                className="w-full accent-[#00e5be] cursor-pointer mt-1"
               />
               <span className="text-[10px] text-slate-400 block mt-1">Netflix standard: 7.0s</span>
             </div>
@@ -281,17 +273,17 @@ export default function SubtitleSettingsModal({
             {/* Gemini Multi-Pass Self-Correction Toggle */}
             <div className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 ${
               geminiAutoFix 
-                ? isDark ? 'bg-indigo-950/30 border-indigo-700/60' : 'bg-indigo-50 border-indigo-200'
-                : isDark ? 'bg-[#161c2e] border-[#252c3f]' : 'bg-slate-50 border-slate-200'
+                ? 'bg-[#181920] border-[#00e5be]/40'
+                : 'bg-[#181920] border-[#262734]'
             }`}>
               <div className="flex items-start gap-2.5">
-                <div className="p-1.5 rounded-lg bg-indigo-600/30 text-indigo-300 mt-0.5">
-                  <Sparkles className="w-4 h-4 text-amber-300" />
+                <div className="p-1.5 rounded-lg bg-[#00e5be]/15 text-[#00e5be] mt-0.5">
+                  <Sparkles className="w-4 h-4 text-[#00e5be]" />
                 </div>
                 <div>
                   <div className="font-bold text-xs text-slate-200 flex items-center gap-1.5">
                     Gemini AI QC Self-Correction Pass
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold uppercase">
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-[#00e5be]/20 text-[#00e5be] border border-[#00e5be]/30 font-semibold uppercase">
                       Recommended
                     </span>
                   </div>
@@ -304,15 +296,13 @@ export default function SubtitleSettingsModal({
                 type="checkbox"
                 checked={geminiAutoFix}
                 onChange={e => setGeminiAutoFix(e.target.checked)}
-                className="rounded accent-indigo-600 w-5 h-5 cursor-pointer"
+                className="rounded accent-[#00e5be] w-5 h-5 cursor-pointer"
               />
             </div>
 
             {/* Language & SDH Toggles */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className={`p-3 rounded-xl border flex items-center justify-between ${
-                isDark ? 'bg-[#161c2e] border-[#252c3f]' : 'bg-slate-50 border-slate-200'
-              }`}>
+              <div className="p-3 rounded-xl border border-[#262734] bg-[#181920] flex items-center justify-between">
                 <div>
                   <span className="font-bold text-xs block">Language Target</span>
                   <span className="text-[10px] text-slate-400">Controls terminology & transcription</span>
@@ -320,9 +310,7 @@ export default function SubtitleSettingsModal({
                 <select
                   value={language}
                   onChange={e => setLanguage(e.target.value)}
-                  className={`rounded-lg px-2 py-1 text-xs border focus:outline-none ${
-                    isDark ? 'bg-[#0e121d] border-[#293247] text-white' : 'bg-white border-slate-300 text-slate-900'
-                  }`}
+                  className="rounded-lg px-2 py-1 text-xs border border-[#262734] bg-[#0e0f12] text-white focus:border-[#00e5be] focus:outline-none"
                 >
                   <option value="en">English</option>
                   <option value="hi">Hindi</option>
@@ -334,9 +322,7 @@ export default function SubtitleSettingsModal({
                 </select>
               </div>
 
-              <div className={`p-3 rounded-xl border flex items-center justify-between ${
-                isDark ? 'bg-[#161c2e] border-[#252c3f]' : 'bg-slate-50 border-slate-200'
-              }`}>
+              <div className="p-3 rounded-xl border border-[#262734] bg-[#181920] flex items-center justify-between">
                 <div>
                   <span className="font-bold text-xs block">Sound Descriptions (SDH)</span>
                   <span className="text-[10px] text-slate-400">Describe non-speech audio events [door slams]</span>
@@ -345,18 +331,16 @@ export default function SubtitleSettingsModal({
                   type="checkbox"
                   checked={sdhMode}
                   onChange={e => setSdhMode(e.target.checked)}
-                  className="rounded accent-indigo-600 w-4 h-4 cursor-pointer"
+                  className="rounded accent-[#00e5be] w-4 h-4 cursor-pointer"
                 />
               </div>
             </div>
 
             {/* Backend API URL for Live Website Deployments */}
-            <div className={`p-3.5 rounded-xl border space-y-2.5 ${
-              isDark ? 'bg-[#161c2e] border-[#252c3f]' : 'bg-slate-50 border-slate-200'
-            }`}>
+            <div className="p-3.5 rounded-xl border border-[#262734] bg-[#181920] space-y-2.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
-                  <Globe className="w-3.5 h-3.5 text-indigo-400" />
+                  <Globe className="w-3.5 h-3.5 text-[#00e5be]" />
                   <div>
                     <span className="font-bold text-xs block">Backend API Server URL</span>
                     <span className="text-[10px] text-slate-400">
@@ -365,7 +349,7 @@ export default function SubtitleSettingsModal({
                   </div>
                 </div>
                 {testStatus && (
-                  <span className={`text-[11px] font-semibold ${testStatus.success ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  <span className={`text-[11px] font-semibold ${testStatus.success ? 'text-[#00e5be]' : 'text-rose-400'}`}>
                     {testStatus.message}
                   </span>
                 )}
@@ -379,9 +363,7 @@ export default function SubtitleSettingsModal({
                     setApiUrl(e.target.value);
                     setTestStatus(null);
                   }}
-                  className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-mono border focus:outline-none ${
-                    isDark ? 'bg-[#0e121d] border-[#293247] text-white' : 'bg-white border-slate-300 text-slate-900'
-                  }`}
+                  className="flex-1 rounded-lg px-3 py-1.5 text-xs font-mono border border-[#262734] bg-[#0e0f12] text-white focus:border-[#00e5be] focus:outline-none"
                 />
                 <button
                   type="button"
@@ -391,11 +373,11 @@ export default function SubtitleSettingsModal({
                       setTestStatus({ success: false, message: 'URL is empty (using default proxy)' });
                       return;
                     }
-                    setTestStatus({ success: null, message: 'Testing...' });
                     try {
-                      const res = await fetch(`${target}/api/health`);
+                      setTestStatus({ success: true, message: 'Testing...' });
+                      const res = await fetch(`${target}/health`, { method: 'GET' });
                       if (res.ok) {
-                        setTestStatus({ success: true, message: '✓ Connected!' });
+                        setTestStatus({ success: true, message: 'Connected ✓ (Backend Healthy)' });
                       } else {
                         setTestStatus({ success: false, message: `Status ${res.status}` });
                       }
@@ -403,9 +385,7 @@ export default function SubtitleSettingsModal({
                       setTestStatus({ success: false, message: 'Failed: Check URL/HTTPS' });
                     }
                   }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer border transition-colors ${
-                    isDark ? 'bg-indigo-950/60 border-indigo-700 text-indigo-300 hover:bg-indigo-900' : 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
-                  }`}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer border border-[#262734] bg-[#14151a] text-[#00e5be] hover:bg-[#22232c] transition-colors"
                 >
                   Test
                 </button>
@@ -415,9 +395,7 @@ export default function SubtitleSettingsModal({
         </div>
 
         {/* Modal Footer */}
-        <div className={`p-4 border-t flex items-center justify-between ${
-          isDark ? 'border-[#202738] bg-[#161c2e]' : 'border-slate-100 bg-slate-50'
-        }`}>
+        <div className="p-4 border-t border-[#262734] bg-[#14151a] flex items-center justify-between">
           <button
             onClick={handleResetDefaults}
             className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors cursor-pointer"
@@ -428,9 +406,7 @@ export default function SubtitleSettingsModal({
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer border ${
-                isDark ? 'border-[#2c374e] hover:bg-[#20283d] text-slate-300' : 'border-slate-300 hover:bg-slate-100 text-slate-700'
-              }`}
+              className="px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer border border-[#262734] bg-[#181920] hover:bg-[#22232c] text-slate-300 hover:text-white"
             >
               Cancel
             </button>
@@ -445,7 +421,7 @@ export default function SubtitleSettingsModal({
                   window.location.reload();
                 }
               }}
-              className="px-4 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
+              className="px-4 py-1.5 rounded-xl text-xs font-bold bg-[#00e5be] hover:bg-[#00c9a7] active:scale-95 text-black shadow-[0_0_12px_rgba(0,229,190,0.25)] flex items-center gap-1.5 transition-all cursor-pointer border-none"
             >
               <Check className="w-4 h-4" />
               Save & Apply Settings

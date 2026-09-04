@@ -188,22 +188,22 @@ export default function SegmentEditor({
   }, [segments]);
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-2xs flex flex-col flex-1 min-h-[500px]">
+    <div className="bg-[#14151a] border border-[#262734] rounded-lg p-2.5 shadow-sm flex flex-col flex-1 min-h-[500px]">
       {/* Sleek Sub-Header & Controls (Sticky while scrolling) */}
-      <div className="sticky top-0 z-20 bg-white/95 backdrop-blur-xs flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-100 pt-0.5">
+      <div className="sticky top-0 z-20 bg-[#14151a]/95 backdrop-blur-xs flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[#262734] pt-0.5">
         <div className="flex items-center gap-2">
-          <h2 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Segments</h2>
-          <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-bold border border-slate-200">
+          <h2 className="text-xs font-bold text-slate-200 uppercase tracking-wider">Segments</h2>
+          <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#181920] text-slate-300 font-bold border border-[#262734]">
             {filteredSegments.length} of {segments.length}
           </span>
 
           {/* Confidence Heatmap Legend Trigger */}
           <button
             onClick={() => setShowHeatmapGuide(!showHeatmapGuide)}
-            className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-500 hover:text-indigo-600 bg-slate-100 hover:bg-indigo-50 px-2 py-0.5 rounded transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-400 hover:text-[#00e5be] bg-[#181920] hover:bg-[#22232c] px-2 py-0.5 rounded border border-[#262734] transition-colors cursor-pointer"
             title="Word Confidence Legend"
           >
-            <Sparkles className="w-3 h-3 text-indigo-500" />
+            <Sparkles className="w-3 h-3 text-[#00e5be]" />
             <span>Heatmap</span>
           </button>
         </div>
@@ -212,13 +212,13 @@ export default function SegmentEditor({
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
           {/* Text Search */}
           <div className="relative">
-            <Search className="w-3 h-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
+            <Search className="w-3 h-3 text-slate-500 absolute left-2 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               placeholder="Search..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-6 pr-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 focus:bg-white focus:border-indigo-500 text-[11px] w-28 transition-all"
+              className="pl-6 pr-2.5 py-1 rounded bg-[#181920] border border-[#262734] focus:border-[#00e5be] focus:outline-none text-[11px] text-[#f1f2f6] w-28 placeholder-slate-500 transition-all"
             />
           </div>
 
@@ -226,7 +226,7 @@ export default function SegmentEditor({
           <select
             value={filterSpeaker}
             onChange={(e) => setFilterSpeaker(e.target.value)}
-            className="px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-[11px] font-semibold text-slate-700 cursor-pointer"
+            className="px-2 py-1 rounded bg-[#181920] border border-[#262734] text-[11px] font-semibold text-slate-200 cursor-pointer focus:border-[#00e5be] focus:outline-none"
           >
             <option value="ALL">All Speakers</option>
             {uniqueSpeakers.map((spk) => (
@@ -237,10 +237,10 @@ export default function SegmentEditor({
           {/* Errors Only Filter */}
           <button
             onClick={() => setFilterErrorsOnly(!filterErrorsOnly)}
-            className={`px-2 py-1 rounded-lg border text-[11px] font-semibold transition-colors cursor-pointer ${
+            className={`px-2 py-1 rounded border text-[11px] font-semibold transition-colors cursor-pointer ${
               filterErrorsOnly
-                ? 'bg-rose-50 text-rose-700 border-rose-300'
-                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                ? 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+                : 'bg-[#181920] text-slate-400 border-[#262734] hover:bg-[#22232c]'
             }`}
           >
             Issues Only
@@ -250,7 +250,7 @@ export default function SegmentEditor({
           <select
             value={nudgeStep}
             onChange={(e) => setNudgeStep(parseFloat(e.target.value))}
-            className="px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-[11px] font-semibold text-slate-700 cursor-pointer"
+            className="px-2 py-1 rounded bg-[#181920] border border-[#262734] text-[11px] font-semibold text-slate-200 cursor-pointer focus:border-[#00e5be] focus:outline-none"
             title="Timestamp nudge step precision"
           >
             <option value={0.01}>±10ms</option>
@@ -261,8 +261,8 @@ export default function SegmentEditor({
           </select>
 
           {/* Confidence Filter Slider */}
-          <div className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-50 border border-slate-200 rounded-lg text-[11px]">
-            <span className="text-slate-500 font-semibold text-[10px]">Conf:</span>
+          <div className="flex items-center gap-1.5 px-2 py-0.5 bg-[#181920] border border-[#262734] rounded text-[11px]">
+            <span className="text-slate-400 font-semibold text-[10px]">Conf:</span>
             <input
               type="range"
               min="0"
@@ -270,10 +270,10 @@ export default function SegmentEditor({
               step="5"
               value={minConfidence}
               onChange={(e) => setMinConfidence(Number(e.target.value))}
-              className="w-14 accent-indigo-600 cursor-pointer h-1"
+              className="w-14 accent-[#00e5be] cursor-pointer h-1 bg-[#22232c] rounded"
               title={`Filter segments with confidence ≥ ${minConfidence}%`}
             />
-            <span className="font-mono text-[10px] font-bold text-slate-700 min-w-[28px]">
+            <span className="font-mono text-[10px] font-bold text-slate-300 min-w-[28px]">
               {minConfidence > 0 ? `≥${minConfidence}%` : 'All'}
             </span>
           </div>
@@ -281,10 +281,10 @@ export default function SegmentEditor({
           {/* Compact / Expanded Toggle */}
           <button
             onClick={() => setIsCompactView(!isCompactView)}
-            className={`p-1 rounded-lg border text-[11px] font-semibold transition-colors cursor-pointer ${
+            className={`p-1 rounded border text-[11px] font-semibold transition-colors cursor-pointer ${
               isCompactView
-                ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                ? 'bg-[#00e5be]/15 text-[#00e5be] border-[#00e5be]/40'
+                : 'bg-[#181920] text-slate-400 border-[#262734] hover:bg-[#22232c]'
             }`}
             title={isCompactView ? 'Switch to Expanded View' : 'Switch to Compact View'}
           >
@@ -295,10 +295,10 @@ export default function SegmentEditor({
           {onOpenSrtPreview && (
             <button
               onClick={onOpenSrtPreview}
-              className="flex items-center gap-1 px-2 py-1 bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 hover:border-indigo-200 rounded-lg text-[11px] font-bold transition-colors cursor-pointer"
+              className="flex items-center gap-1 px-2 py-1 bg-[#181920] hover:bg-[#22232c] text-slate-300 hover:text-[#00e5be] border border-[#262734] rounded text-[11px] font-semibold transition-colors cursor-pointer"
               title="Open Live SRT Subtitle Preview & Quality Audit"
             >
-              <Film className="w-3 h-3 text-indigo-600" />
+              <Film className="w-3 h-3 text-[#00e5be]" />
               <span>SRT Preview</span>
             </button>
           )}
@@ -306,7 +306,7 @@ export default function SegmentEditor({
           {/* Add Segment Button */}
           <button
             onClick={addNewSegmentAtEnd}
-            className="flex items-center gap-1 px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-[11px] font-bold transition-colors cursor-pointer"
+            className="flex items-center gap-1 px-2.5 py-1 bg-[#00e5be]/15 hover:bg-[#00e5be]/25 text-[#00e5be] border border-[#00e5be]/40 rounded text-[11px] font-bold transition-colors cursor-pointer"
           >
             <Plus className="w-3 h-3" />
             <span>Add</span>
@@ -316,53 +316,53 @@ export default function SegmentEditor({
 
       {/* Heatmap Legend Guide (Collapsible) */}
       {showHeatmapGuide && (
-        <div className="mt-2 p-2 bg-slate-50 rounded-lg border border-slate-200 text-[11px] flex flex-wrap items-center justify-between gap-2 animate-in fade-in">
+        <div className="mt-2 p-2 bg-[#181920] rounded border border-[#262734] text-[11px] flex flex-wrap items-center justify-between gap-2 animate-in fade-in">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-bold text-slate-700 flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-indigo-600" />
+            <span className="font-bold text-slate-200 flex items-center gap-1">
+              <Sparkles className="w-3 h-3 text-[#00e5be]" />
               Heatmap Filter:
             </span>
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-300 font-bold">
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 font-bold">
               🔴 Low (&lt; 50%)
             </span>
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 font-bold">
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-bold">
               🟡 Needs Review (50%–79%)
             </span>
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium">
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-medium">
               ✓ High (&ge; 80% - Auto Hidden)
             </span>
           </div>
-          <span className="text-slate-500 text-[10px]">
+          <span className="text-slate-400 text-[10px]">
             💡 Only words &lt; 80% appear as clickable chips to save reviewer time!
           </span>
         </div>
       )}
 
       {/* Scrollable Segments List (Full-Height with Generous pb-36 Bottom Spacer) */}
-      <div className="flex-1 overflow-y-auto space-y-2.5 pt-2.5 pr-1 pb-36">
+      <div className="flex-1 overflow-y-auto space-y-2 pt-2 pr-1 pb-36">
         {filteredSegments.length === 0 ? (
           <div className="text-center py-12 px-4">
             {audioLoaded ? (
-              <div className="max-w-md mx-auto bg-indigo-50/50 border border-dashed border-indigo-200 rounded-2xl p-6 shadow-2xs">
-                <Sparkles className="w-8 h-8 text-indigo-600 mx-auto mb-2 animate-bounce" />
-                <h3 className="text-sm font-bold text-slate-800">Audio Ready for AI Transcription</h3>
-                <p className="text-xs text-slate-500 mt-1 mb-3">
+              <div className="max-w-md mx-auto bg-[#181920] border border-dashed border-[#262734] rounded-xl p-6 shadow-sm">
+                <Sparkles className="w-8 h-8 text-[#00e5be] mx-auto mb-2 animate-pulse" />
+                <h3 className="text-sm font-bold text-slate-200">Audio Ready for AI Transcription</h3>
+                <p className="text-xs text-slate-400 mt-1 mb-3">
                   Click the button below to auto-transcribe speakers, verbatim script, and millisecond timestamps.
                 </p>
                 <button
                   type="button"
                   onClick={onStartTranscribe}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-xl text-xs font-bold shadow-xs transition-transform active:scale-95 cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#00e5be] hover:bg-[#00c9a7] active:bg-[#00b4d8] text-black rounded text-xs font-bold shadow-[0_0_12px_rgba(0,229,190,0.25)] transition-transform active:scale-95 cursor-pointer"
                 >
-                  <Sparkles className="w-4 h-4" />
+                  <Sparkles className="w-4 h-4 fill-current" />
                   <span>Start Auto-Transcription Now</span>
                 </button>
               </div>
             ) : (
-              <div className="py-12 text-slate-400">
-                <Volume2 className="w-8 h-8 mx-auto mb-2 text-slate-300" />
-                <p className="text-xs font-semibold text-slate-600">No audio loaded</p>
-                <p className="text-[11px] text-slate-400 mt-0.5">Upload an audio file above to start transcription.</p>
+              <div className="py-12 text-slate-500">
+                <Volume2 className="w-8 h-8 mx-auto mb-2 text-slate-600" />
+                <p className="text-xs font-semibold text-slate-400">No audio loaded</p>
+                <p className="text-[11px] text-slate-500 mt-0.5">Import an audio file above to start transcription.</p>
               </div>
             )}
           </div>
@@ -395,14 +395,14 @@ export default function SegmentEditor({
               <div
                 key={seg.segment_id}
                 onClick={() => setActiveSegmentId(seg.segment_id)}
-                className={`${isCompactView ? 'p-2 rounded-lg' : 'p-3 rounded-xl'} border transition-all ${
+                className={`${isCompactView ? 'p-2 rounded-lg' : 'p-3 rounded-lg'} border transition-all ${
                   isActive
-                    ? 'bg-indigo-50/40 border-indigo-500 shadow-sm ring-1 ring-indigo-500/20'
+                    ? 'bg-[#181920] border-[#00e5be] shadow-[0_0_15px_rgba(0,229,190,0.12)] ring-1 ring-[#00e5be]/30'
                     : hasErrors
-                    ? 'bg-rose-50/20 border-rose-300 hover:border-rose-400 shadow-2xs'
+                    ? 'bg-[#181920] border-rose-500/40 hover:border-rose-500/60'
                     : hasWarnings
-                    ? 'bg-amber-50/20 border-amber-300 hover:border-amber-400 shadow-2xs'
-                    : 'bg-white border-slate-200 hover:border-slate-300 shadow-2xs'
+                    ? 'bg-[#181920] border-amber-500/40 hover:border-amber-500/60'
+                    : 'bg-[#181920] border-[#262734] hover:border-[#36384a]'
                 }`}
               >
                 {/* Segment Top Control Bar (Compact Single Row) */}
@@ -416,10 +416,10 @@ export default function SegmentEditor({
                         onPlaySegment(seg.start_time, seg.end_time);
                         setActiveSegmentId(seg.segment_id);
                       }}
-                      className={`flex items-center justify-center h-6 w-6 rounded-lg text-white shadow-2xs transition-transform active:scale-95 cursor-pointer ${
+                      className={`flex items-center justify-center h-6 w-6 rounded text-black font-bold shadow-xs transition-transform active:scale-95 cursor-pointer ${
                         isSpeaker1
-                          ? 'bg-indigo-600 hover:bg-indigo-700'
-                          : 'bg-emerald-600 hover:bg-emerald-700'
+                          ? 'bg-[#00e5be] hover:bg-[#00c9a7]'
+                          : 'bg-[#00e5ff] hover:bg-[#00b4d8]'
                       }`}
                       title="Play this segment in continuous loop"
                     >
@@ -437,13 +437,13 @@ export default function SegmentEditor({
                         }
                         setActiveSegmentId(seg.segment_id);
                       }}
-                      className="flex items-center justify-center h-6 w-6 rounded-lg bg-slate-100 hover:bg-rose-100 text-slate-600 hover:text-rose-700 border border-slate-200 transition-colors active:scale-95 cursor-pointer"
+                      className="flex items-center justify-center h-6 w-6 rounded bg-[#22232c] hover:bg-[#2c2d38] text-slate-300 hover:text-rose-400 border border-[#323444] transition-colors active:scale-95 cursor-pointer"
                       title="Stop & Reset Marker to Segment Start"
                     >
                       <Square className="w-2.5 h-2.5 fill-current" />
                     </button>
 
-                    <span className="font-mono text-[11px] font-bold text-slate-500 px-1 py-0.2 bg-slate-100 rounded">
+                    <span className="font-mono text-[11px] font-bold text-slate-400 px-1 py-0.2 bg-[#22232c] rounded border border-[#323444]">
                       #{seg.segment_id}
                     </span>
 
@@ -451,10 +451,10 @@ export default function SegmentEditor({
                     <select
                       value={seg.speaker}
                       onChange={(e) => updateSegmentField(seg.segment_id, 'speaker', e.target.value)}
-                      className={`text-[11px] font-bold px-2 py-0.5 rounded-lg border cursor-pointer ${
+                      className={`text-[11px] font-semibold px-2 py-0.5 rounded border cursor-pointer focus:outline-none ${
                         isSpeaker1
-                          ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                          : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          ? 'bg-[#22232c] text-[#00e5be] border-[#00e5be]/40'
+                          : 'bg-[#22232c] text-[#00e5ff] border-[#00e5ff]/40'
                       }`}
                     >
                       {uniqueSpeakers.map((spk) => (
@@ -472,7 +472,7 @@ export default function SegmentEditor({
                     <select
                       value={seg.gender}
                       onChange={(e) => updateSegmentField(seg.segment_id, 'gender', e.target.value)}
-                      className="text-[11px] font-medium px-2 py-0.5 rounded-lg border border-slate-200 bg-white text-slate-700 cursor-pointer"
+                      className="text-[11px] font-medium px-2 py-0.5 rounded border border-[#323444] bg-[#22232c] text-slate-200 cursor-pointer focus:outline-none"
                     >
                       <option value="Male">Male</option>
                       <option value="Female">Female</option>
@@ -481,26 +481,26 @@ export default function SegmentEditor({
 
                     {/* Low Confidence Indicator Flag */}
                     {hasLowConfidenceWord && (
-                      <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-700 border border-rose-200">
+                      <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30">
                         ⚠️ Low Conf
                       </span>
                     )}
                   </div>
 
                   {/* Right: Millisecond Timestamps & Actions */}
-                  <div className="flex items-center gap-1 font-mono text-[11px] text-slate-600">
+                  <div className="flex items-center gap-1 font-mono text-[11px] text-slate-300">
                     {/* Start Time Input with Micro-Nudge */}
-                    <div className={`flex items-center gap-0.5 bg-slate-50 px-1.5 py-0.5 rounded-lg border shadow-2xs ${
-                      seg.start_time >= seg.end_time ? 'border-rose-400 bg-rose-50' : 'border-slate-200'
+                    <div className={`flex items-center gap-0.5 bg-[#22232c] px-1.5 py-0.5 rounded border ${
+                      seg.start_time >= seg.end_time ? 'border-rose-500 bg-rose-500/15' : 'border-[#323444]'
                     }`}>
-                      <span className="text-slate-400 text-[9px] font-bold">START</span>
+                      <span className="text-slate-500 text-[9px] font-bold">START</span>
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           updateSegmentField(seg.segment_id, 'start_time', parseFloat(Math.max(0, seg.start_time - nudgeStep).toFixed(3)));
                         }}
-                        className="px-0.5 text-[9px] text-slate-400 hover:text-indigo-600 hover:bg-slate-200 rounded cursor-pointer"
+                        className="px-0.5 text-[9px] text-slate-400 hover:text-[#00e5be] hover:bg-[#2c2d38] rounded cursor-pointer"
                         title={`Nudge -${nudgeStep}s`}
                       >
                         ◀
@@ -510,7 +510,7 @@ export default function SegmentEditor({
                         step="0.001"
                         value={seg.start_time}
                         onChange={(e) => updateSegmentField(seg.segment_id, 'start_time', parseFloat(e.target.value) || 0)}
-                        className="w-12 bg-transparent text-slate-800 font-bold focus:outline-none text-center font-mono text-[11px]"
+                        className="w-12 bg-transparent text-slate-200 font-bold focus:outline-none text-center font-mono text-[11px]"
                       />
                       <button
                         type="button"
@@ -518,28 +518,28 @@ export default function SegmentEditor({
                           e.stopPropagation();
                           updateSegmentField(seg.segment_id, 'start_time', parseFloat((seg.start_time + nudgeStep).toFixed(3)));
                         }}
-                        className="px-0.5 text-[9px] text-slate-400 hover:text-indigo-600 hover:bg-slate-200 rounded cursor-pointer"
+                        className="px-0.5 text-[9px] text-slate-400 hover:text-[#00e5be] hover:bg-[#2c2d38] rounded cursor-pointer"
                         title={`Nudge +${nudgeStep}s`}
                       >
                         ▶
                       </button>
-                      <span className="text-slate-400 text-[9px]">s</span>
+                      <span className="text-slate-500 text-[9px]">s</span>
                     </div>
 
-                    <span className="text-slate-400">→</span>
+                    <span className="text-slate-500">→</span>
 
                     {/* End Time Input with Micro-Nudge */}
-                    <div className={`flex items-center gap-0.5 bg-slate-50 px-1.5 py-0.5 rounded-lg border shadow-2xs ${
-                      seg.start_time >= seg.end_time ? 'border-rose-400 bg-rose-50' : 'border-slate-200'
+                    <div className={`flex items-center gap-0.5 bg-[#22232c] px-1.5 py-0.5 rounded border ${
+                      seg.start_time >= seg.end_time ? 'border-rose-500 bg-rose-500/15' : 'border-[#323444]'
                     }`}>
-                      <span className="text-slate-400 text-[9px] font-bold">END</span>
+                      <span className="text-slate-500 text-[9px] font-bold">END</span>
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           updateSegmentField(seg.segment_id, 'end_time', parseFloat(Math.max(seg.start_time + 0.1, seg.end_time - nudgeStep).toFixed(3)));
                         }}
-                        className="px-0.5 text-[9px] text-slate-400 hover:text-indigo-600 hover:bg-slate-200 rounded cursor-pointer"
+                        className="px-0.5 text-[9px] text-slate-400 hover:text-[#00e5be] hover:bg-[#2c2d38] rounded cursor-pointer"
                         title={`Nudge -${nudgeStep}s`}
                       >
                         ◀
@@ -549,7 +549,7 @@ export default function SegmentEditor({
                         step="0.001"
                         value={seg.end_time}
                         onChange={(e) => updateSegmentField(seg.segment_id, 'end_time', parseFloat(e.target.value) || 0)}
-                        className="w-12 bg-transparent text-slate-800 font-bold focus:outline-none text-center font-mono text-[11px]"
+                        className="w-12 bg-transparent text-slate-200 font-bold focus:outline-none text-center font-mono text-[11px]"
                       />
                       <button
                         type="button"
@@ -557,12 +557,12 @@ export default function SegmentEditor({
                           e.stopPropagation();
                           updateSegmentField(seg.segment_id, 'end_time', parseFloat((seg.end_time + nudgeStep).toFixed(3)));
                         }}
-                        className="px-0.5 text-[9px] text-slate-400 hover:text-indigo-600 hover:bg-slate-200 rounded cursor-pointer"
+                        className="px-0.5 text-[9px] text-slate-400 hover:text-[#00e5be] hover:bg-[#2c2d38] rounded cursor-pointer"
                         title={`Nudge +${nudgeStep}s`}
                       >
                         ▶
                       </button>
-                      <span className="text-slate-400 text-[9px]">s</span>
+                      <span className="text-slate-500 text-[9px]">s</span>
                     </div>
 
                     {/* Duration Badge */}
@@ -574,8 +574,8 @@ export default function SegmentEditor({
                         <span
                           className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
                             isWarn
-                              ? 'bg-rose-100 text-rose-700 border border-rose-300'
-                              : 'text-slate-500 bg-slate-100'
+                              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                              : 'text-slate-400 bg-[#22232c]'
                           }`}
                           title={isInvalid ? '⚠️ Start time must be less than end time!' : isOutOfRange ? '⚠️ Duration out of range (0.5s–20s)' : ''}
                         >
@@ -585,14 +585,14 @@ export default function SegmentEditor({
                     })()}
 
                     {/* Actions: Split / Merge / Delete */}
-                    <div className="flex items-center gap-0.5 ml-1 border-l border-slate-200 pl-1">
+                    <div className="flex items-center gap-0.5 ml-1 border-l border-[#262734] pl-1">
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           splitSegment(seg);
                         }}
                         title="Split segment"
-                        className="p-1 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 rounded cursor-pointer"
+                        className="p-1 hover:bg-[#22232c] text-slate-400 hover:text-[#00e5be] rounded cursor-pointer"
                       >
                         <Split className="w-3 h-3" />
                       </button>
@@ -604,7 +604,7 @@ export default function SegmentEditor({
                             mergeWithNext(idx);
                           }}
                           title="Merge with next"
-                          className="p-1 hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 rounded cursor-pointer"
+                          className="p-1 hover:bg-[#22232c] text-slate-400 hover:text-emerald-400 rounded cursor-pointer"
                         >
                           <Merge className="w-3 h-3" />
                         </button>
@@ -616,7 +616,7 @@ export default function SegmentEditor({
                           deleteSegment(seg.segment_id);
                         }}
                         title="Delete segment"
-                        className="p-1 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded cursor-pointer"
+                        className="p-1 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded cursor-pointer"
                       >
                         <Trash2 className="w-3 h-3" />
                       </button>
@@ -630,9 +630,9 @@ export default function SegmentEditor({
                   if (lowConfidenceWords.length === 0) return null;
 
                   return (
-                    <div className="mb-1.5 p-1.5 bg-amber-50/60 rounded-lg border border-amber-200/80 flex flex-wrap items-center gap-1">
-                      <span className="text-[9px] font-bold text-amber-800 uppercase tracking-wider mr-0.5 flex items-center gap-1">
-                        <Sparkles className="w-2.5 h-2.5 text-amber-600" />
+                    <div className="mb-1.5 p-1.5 bg-[#22232c] rounded border border-[#323444] flex flex-wrap items-center gap-1">
+                      <span className="text-[9px] font-bold text-amber-400 uppercase tracking-wider mr-0.5 flex items-center gap-1">
+                        <Sparkles className="w-2.5 h-2.5 text-amber-400" />
                         Needs Review (&lt; 80%):
                       </span>
                       {lowConfidenceWords.map((wObj, wIdx) => {
@@ -651,15 +651,15 @@ export default function SegmentEditor({
                               setActiveSegmentId(seg.segment_id);
                             }}
                             title={`"${wObj.word}" — Confidence: ${(conf * 100).toFixed(0)}% (Click to loop phrase)`}
-                            className={`inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[11px] font-semibold transition-all active:scale-95 cursor-pointer shadow-2xs ${
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[11px] font-semibold transition-all active:scale-95 cursor-pointer ${
                               isVeryLow
-                                ? 'bg-rose-100 hover:bg-rose-200 text-rose-900 border border-rose-300 font-bold'
-                                : 'bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300'
+                                ? 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 font-bold'
+                                : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40'
                             }`}
                           >
                             <span>{wObj.word}</span>
                             <span className={`text-[8px] font-mono font-bold ${
-                              isVeryLow ? 'text-rose-700' : 'text-amber-700'
+                              isVeryLow ? 'text-rose-400' : 'text-amber-400'
                             }`}>
                               {(conf * 100).toFixed(0)}%
                             </span>
@@ -683,17 +683,17 @@ export default function SegmentEditor({
                     data-enable-grammarly="false"
                     autoCorrect="off"
                     autoCapitalize="off"
-                    className={`w-full bg-white border border-slate-200 rounded-lg ${isCompactView ? 'p-1.5 text-xs' : 'p-2.5 text-sm'} text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-100 resize-y leading-relaxed font-sans transition-all`}
+                    className={`w-full bg-[#14151a] border border-[#262734] rounded ${isCompactView ? 'p-1.5 text-xs' : 'p-2 text-sm'} text-[#f1f2f6] placeholder-slate-600 focus:border-[#00e5be] focus:outline-none focus:ring-1 focus:ring-[#00e5be]/20 resize-y leading-relaxed font-sans transition-all`}
                   />
                   {/* SRT-06: Character counter with broadcast SRT line-length warning */}
                   <div className="flex items-center justify-between mt-0.5 px-0.5 text-[10px] font-mono">
-                    <span className="text-slate-400">
+                    <span className="text-slate-500">
                       {seg.words && seg.words.length > 0 ? `${seg.words.length} words` : `${(seg.transcript || '').trim().split(/\s+/).filter(Boolean).length} words`}
                     </span>
                     <span className={`${
                       (seg.transcript || '').length > 42
-                        ? 'text-rose-600 font-bold bg-rose-50 px-1.5 py-0.2 rounded border border-rose-200'
-                        : 'text-slate-400'
+                        ? 'text-rose-400 font-bold bg-rose-500/15 px-1.5 py-0.2 rounded border border-rose-500/30'
+                        : 'text-slate-500'
                     }`}>
                       {(seg.transcript || '').length} chars
                       {(seg.transcript || '').length > 42 && ' ⚠️ >42 (SRT limit)'}
@@ -707,16 +707,16 @@ export default function SegmentEditor({
                     {seg.qc_errors.map((err, errIdx) => (
                       <div
                         key={errIdx}
-                        className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border ${
+                        className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${
                           err.severity === 'error'
-                            ? 'bg-rose-50 text-rose-700 border-rose-200'
-                            : 'bg-amber-50 text-amber-700 border-amber-200'
+                            ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                            : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
                         }`}
                       >
                         {err.severity === 'error' ? (
-                          <AlertCircle className="w-3 h-3 text-rose-600 shrink-0" />
+                          <AlertCircle className="w-3 h-3 text-rose-400 shrink-0" />
                         ) : (
-                          <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                          <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
                         )}
                         <span>{err.message}</span>
                       </div>
