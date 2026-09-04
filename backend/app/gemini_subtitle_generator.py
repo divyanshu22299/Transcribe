@@ -924,16 +924,19 @@ def generate_subtitles(
     dual_ch_info = detect_dual_channel_layout(audio_path_out)
     is_dual_channel = dual_ch_info.get("is_dual_channel", False)
     
-    # 6. Run Whisper on full audio for word-level timestamps (runs once)
-    if progress_callback:
-        progress_callback("Whisper Alignment", 20, "Extracting word-level timestamps with Whisper...")
-    log_terminal("Running Whisper for precise timestamp extraction...")
+    # 6. Run Whisper on audio for word-level timestamps
+    # For audio <= 180s (3 minutes), run Whisper on full audio upfront (fast, 2-4s)
+    # For long audio (> 180s, e.g. 40 minutes), run Whisper per-chunk on the 50s slice inside each batch loop
     whisper_words = []
-    try:
-        whisper_words = get_whisper_word_timestamps(audio_path_out, language=language)
-        log_terminal(f"Whisper produced {len(whisper_words)} word timestamps for alignment.")
-    except Exception as e:
-        log_terminal(f"WARNING: Whisper failed ({e}), will use Gemini timestamps as fallback.")
+    if total_duration <= 180.0:
+        if progress_callback:
+            progress_callback("Whisper Alignment", 20, "Extracting word-level timestamps with Whisper...")
+        log_terminal("Running Whisper for precise timestamp extraction...")
+        try:
+            whisper_words = get_whisper_word_timestamps(audio_path_out, language=language)
+            log_terminal(f"Whisper produced {len(whisper_words)} word timestamps for alignment.")
+        except Exception as e:
+            log_terminal(f"WARNING: Whisper failed ({e}), will use Gemini timestamps as fallback.")
     
     # 7. Chunk long audio at dialogue boundaries
     if total_duration > 65.0:
@@ -1080,6 +1083,17 @@ def generate_subtitles(
                     "is_forced_narrative": bool(s.get("is_forced_narrative", False))
                 })
                     
+            # For long audio (> 180s), extract Whisper words on this 50s slice
+            if total_duration > 180.0 and len(chunks) > 1:
+                try:
+                    cw = get_whisper_word_timestamps(target_path, language=resolved_language)
+                    for w in cw:
+                        w["start"] = round(w["start"] + chunk_s, 3)
+                        w["end"] = round(w["end"] + chunk_s, 3)
+                    whisper_words.extend(cw)
+                except Exception as e:
+                    log_terminal(f"Chunk {chunk_idx} Whisper fallback warning: {e}")
+
         finally:
             if len(chunks) > 1 and os.path.exists(target_path):
                 try:
@@ -1175,15 +1189,19 @@ async def generate_subtitles_stream(
     dual_ch_info = await asyncio.to_thread(detect_dual_channel_layout, audio_path_out)
     is_dual_channel = dual_ch_info.get("is_dual_channel", False)
     
-    # 3. Run Whisper on full audio for word-level timestamps (runs once)
-    log_terminal("Running Whisper for precise timestamp extraction...")
-    yield f"data: {json.dumps({'type': 'progress', 'chunk_index': 0, 'total_chunks': 0, 'stage': 'Extracting word-level timestamps with Whisper...'})}\n\n"
+    # 3. Run Whisper on audio for word-level timestamps
+    # For audio <= 180s (3 minutes), run Whisper on full audio upfront (fast, 2-4s)
+    # For long audio (> 180s, e.g. 40 minutes), DO NOT block upfront!
+    # Instead, run Whisper per-chunk on each 50s slice inside each batch loop
     whisper_words = []
-    try:
-        whisper_words = await asyncio.to_thread(get_whisper_word_timestamps, audio_path_out, language)
-        log_terminal(f"Whisper produced {len(whisper_words)} word timestamps for alignment.")
-    except Exception as e:
-        log_terminal(f"WARNING: Whisper failed ({e}), will use Gemini timestamps as fallback.")
+    if total_duration <= 180.0:
+        log_terminal("Running Whisper for precise timestamp extraction...")
+        yield f"data: {json.dumps({'type': 'progress', 'chunk_index': 0, 'total_chunks': 0, 'stage': 'Extracting word-level timestamps with Whisper...'})}\n\n"
+        try:
+            whisper_words = await asyncio.to_thread(get_whisper_word_timestamps, audio_path_out, language)
+            log_terminal(f"Whisper produced {len(whisper_words)} word timestamps for alignment.")
+        except Exception as e:
+            log_terminal(f"WARNING: Whisper failed ({e}), will use Gemini timestamps as fallback.")
     
     # 4. Chunk long audio
     if total_duration > 65.0:
@@ -1232,6 +1250,21 @@ async def generate_subtitles_stream(
             target_path = str(slice_path)
         else:
             target_path = audio_path_out
+
+        # For long audio (> 180s), run Whisper specifically on this 50s slice
+        chunk_whisper_words = []
+        if total_duration > 180.0 and total_chunks > 1:
+            try:
+                raw_cw = await asyncio.to_thread(get_whisper_word_timestamps, target_path, resolved_language)
+                for w in raw_cw:
+                    chunk_whisper_words.append({
+                        "word": w["word"],
+                        "start": round(w["start"] + chunk_s, 3),
+                        "end": round(w["end"] + chunk_s, 3),
+                        "probability": w.get("probability", 1.0)
+                    })
+            except Exception as e:
+                log_terminal(f"Batch {chunk_idx} Whisper alignment warning: {e}")
             
         try:
             # Read chunk audio bytes directly (under 3MB, well within 20MB inline limit)
@@ -1303,9 +1336,9 @@ async def generate_subtitles_stream(
                     
             if response is None:
                 log_terminal(f"Gemini API unavailable for Batch {chunk_idx}. Using acoustic Whisper words fallback...")
-                chunk_whisper_words = [w for w in whisper_words if w["start"] >= chunk_s - 0.2 and w["end"] <= chunk_e + 0.2]
-                if chunk_whisper_words:
-                    subs = group_whisper_words_into_subtitles(chunk_whisper_words, chunk_s, cpl_limit=cpl_limit)
+                active_words = chunk_whisper_words if chunk_whisper_words else [w for w in whisper_words if w["start"] >= chunk_s - 0.2 and w["end"] <= chunk_e + 0.2]
+                if active_words:
+                    subs = group_whisper_words_into_subtitles(active_words, chunk_s, cpl_limit=cpl_limit)
                     parsed = {"subtitles": subs}
                 else:
                     yield f"data: {json.dumps({'type': 'batch_error', 'chunk_index': chunk_idx, 'error': str(last_error)})}\n\n"
@@ -1354,8 +1387,9 @@ async def generate_subtitles_stream(
                 split_batch.extend(split_and_balance_event(s, cpl_limit=cpl_limit, max_lines=max_lines))
 
             # Stage 2: Monotonic Whisper Acoustic Synchronization (tight search radius 3.0s)
-            if whisper_words and split_batch:
-                split_batch = align_subtitle_timestamps(split_batch, whisper_words, search_radius=3.0)
+            active_words = chunk_whisper_words if chunk_whisper_words else [w for w in whisper_words if w["start"] >= chunk_s - 0.5 and w["end"] <= chunk_e + 0.5]
+            if active_words and split_batch:
+                split_batch = align_subtitle_timestamps(split_batch, active_words, search_radius=3.0)
             
             # Stage 3: Non-destructive Netflix polish (gap chaining & CPS padding)
             processed_batch = polish_subtitle_events_netflix(

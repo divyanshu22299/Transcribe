@@ -944,7 +944,11 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
         )
 
     unique_prefix = uuid.uuid4().hex[:8]
-    safe_filename = f"{unique_prefix}_{file.filename}"
+    raw_stem = Path(file.filename).stem
+    # Sanitize filename stem to eliminate unsafe characters that break URLs or filesystems
+    clean_stem = re.sub(r'[^\w\.-]', '_', raw_stem).strip()
+    clean_stem = re.sub(r'_+', '_', clean_stem)
+    safe_filename = f"{unique_prefix}_{clean_stem}{ext}"
     file_path = UPLOAD_DIR / safe_filename
     
     try:
@@ -1001,6 +1005,8 @@ def resolve_active_session_video(video_id: str) -> Optional[str]:
     """Resolve media path (video or audio) from in-memory active_sessions or automatically restore from disk in UPLOAD_DIR."""
     if not video_id:
         return None
+    import urllib.parse
+    video_id = urllib.parse.unquote(str(video_id)).strip()
     if video_id in active_sessions and os.path.exists(active_sessions[video_id].get("file_path", "")):
         return active_sessions[video_id]["file_path"]
         
@@ -1042,6 +1048,8 @@ def resolve_active_session_video(video_id: str) -> Optional[str]:
 @app.get("/api/subtitle/waveform/{video_id}")
 async def get_subtitle_waveform_endpoint(video_id: str, points_per_sec: int = 50):
     """Return high-precision acoustic waveform peaks for video_id matching speech ups and lows."""
+    import urllib.parse
+    video_id = urllib.parse.unquote(str(video_id)).strip()
     audio_path = None
     if video_id in active_sessions and active_sessions[video_id].get("audio_path"):
         cand = Path(active_sessions[video_id]["audio_path"])
@@ -1064,8 +1072,10 @@ async def get_subtitle_waveform_endpoint(video_id: str, points_per_sec: int = 50
                 extracted_path = audio_info.get("audio_path")
                 if extracted_path and os.path.exists(extracted_path):
                     audio_path = Path(extracted_path)
+                else:
+                    audio_path = Path(video_path)
             except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Failed to extract audio track: {e}")
+                audio_path = Path(video_path)
         else:
             raise HTTPException(status_code=404, detail="Media session or audio track not found.")
             

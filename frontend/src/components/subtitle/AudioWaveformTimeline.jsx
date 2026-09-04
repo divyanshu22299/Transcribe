@@ -68,7 +68,13 @@ export default function AudioWaveformTimeline({
         try {
           setIsAudioLoading(true);
           const base = API_BASE || '';
-          const res = await fetch(`${base}/api/subtitle/waveform/${videoId}`);
+          let res = await fetch(`${base}/api/subtitle/waveform/${encodeURIComponent(videoId)}`);
+          if (!res.ok && res.status === 404) {
+            // Allow background conversion task up to 1.5s to finish WAV extraction and retry
+            await new Promise(r => setTimeout(r, 1500));
+            if (isCancelled) return;
+            res = await fetch(`${base}/api/subtitle/waveform/${encodeURIComponent(videoId)}`);
+          }
           if (res.ok) {
             const data = await res.json();
             if (!isCancelled && data.peaks && data.peaks.length > 0) {
@@ -83,8 +89,8 @@ export default function AudioWaveformTimeline({
         }
       }
 
-      // Priority 2: Web Audio API decoding with Peak + RMS Envelope Dynamics
-      if (selectedFile || videoUrl) {
+      // Priority 2: Web Audio API decoding with Peak + RMS Envelope Dynamics (for files < 80MB)
+      if ((selectedFile || videoUrl) && (!selectedFile || selectedFile.size < 80 * 1024 * 1024)) {
         try {
           setIsAudioLoading(true);
           let arrayBuffer;
@@ -152,53 +158,63 @@ export default function AudioWaveformTimeline({
     return () => { isCancelled = true; };
   }, [videoId, videoUrl, selectedFile, API_BASE]);
 
-  // ── 2. Clean Continuous Acoustic Waveform (100% Physically Aligned to Zoom) ──
-  useEffect(() => {
+  // ── 2. Viewport-Based Acoustic Waveform Renderer (Supports 40+ min media without canvas crashes) ──
+  const drawWaveform = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const scrollElem = scrollRef.current;
+    if (!canvas || !scrollElem) return;
+
+    const viewportWidth = Math.max(scrollElem.clientWidth || 900, 400);
+    const scrollLeft = scrollElem.scrollLeft || 0;
+    const height = canvas.height || 160;
+
+    if (canvas.width !== viewportWidth) {
+      canvas.width = viewportWidth;
+    }
+
     const ctx = canvas.getContext('2d');
-    const width = timelineWidth;
-    const height = canvas.height;
-
-    canvas.width = width;
-    ctx.clearRect(0, 0, width, height);
-
-    if (!waveformPeaks || waveformPeaks.length === 0) return;
+    ctx.clearRect(0, 0, viewportWidth, height);
 
     const centerY = height / 2 + 8;
     const maxAmplitude = height * 0.38;
 
-    // Draw center baseline
+    // Center baseline
     ctx.strokeStyle = 'rgba(70, 85, 115, 0.35)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(0, centerY);
-    ctx.lineTo(width, centerY);
+    ctx.lineTo(viewportWidth, centerY);
     ctx.stroke();
+
+    if (!waveformPeaks || waveformPeaks.length === 0) return;
 
     const totalPoints = waveformPeaks.length;
     const pps = waveformPointsPerSec || 50;
-
-    // Exact physical pixel step per waveform sample: (1 / pps) * zoomLevel
     const stepX = zoomLevel / pps;
+
+    // Viewport sample range: only draw samples visible in [scrollLeft - 20, scrollLeft + viewportWidth + 20]
+    const startIdx = Math.max(0, Math.floor((scrollLeft - 20) / stepX));
+    const endIdx = Math.min(totalPoints, Math.ceil((scrollLeft + viewportWidth + 20) / stepX));
+
+    if (endIdx <= startIdx) return;
 
     // Upper envelope
     ctx.beginPath();
-    ctx.moveTo(0, centerY);
-    for (let i = 0; i < totalPoints; i++) {
-      const x = i * stepX;
-      if (x > width + 50) break;
+    const firstX = (startIdx * stepX) - scrollLeft;
+    ctx.moveTo(firstX, centerY);
+
+    for (let i = startIdx; i < endIdx; i++) {
+      const x = (i * stepX) - scrollLeft;
       const amp = waveformPeaks[i] || 0.02;
       const y = centerY - (amp * maxAmplitude);
       ctx.lineTo(x, y);
     }
-    const lastX = Math.min(width, totalPoints * stepX);
+    const lastX = ((endIdx - 1) * stepX) - scrollLeft;
     ctx.lineTo(lastX, centerY);
 
     // Lower envelope (mirrored)
-    for (let i = totalPoints - 1; i >= 0; i--) {
-      const x = i * stepX;
-      if (x > width + 50) continue;
+    for (let i = endIdx - 1; i >= startIdx; i--) {
+      const x = (i * stepX) - scrollLeft;
       const amp = waveformPeaks[i] || 0.02;
       const y = centerY + (amp * maxAmplitude);
       ctx.lineTo(x, y);
@@ -218,7 +234,33 @@ export default function AudioWaveformTimeline({
     ctx.strokeStyle = 'rgba(0, 229, 190, 0.90)';
     ctx.lineWidth = 1.4;
     ctx.stroke();
-  }, [waveformPeaks, waveformPointsPerSec, zoomLevel, timelineWidth]);
+  }, [waveformPeaks, waveformPointsPerSec, zoomLevel]);
+
+  // Redraw when peaks, pps, or zoom changes
+  useEffect(() => {
+    drawWaveform();
+  }, [drawWaveform]);
+
+  // Redraw on horizontal scroll or window resize (60FPS via requestAnimationFrame)
+  useEffect(() => {
+    const scrollElem = scrollRef.current;
+    if (!scrollElem) return;
+
+    let rafId = null;
+    const handleScrollOrResize = () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(drawWaveform);
+    };
+
+    scrollElem.addEventListener('scroll', handleScrollOrResize, { passive: true });
+    window.addEventListener('resize', handleScrollOrResize);
+
+    return () => {
+      scrollElem.removeEventListener('scroll', handleScrollOrResize);
+      window.removeEventListener('resize', handleScrollOrResize);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, [drawWaveform]);
 
   // ── 3. Left-Oriented Zoom Controller (Left edge anchored, right edge expands/contracts) ──
   const handleZoomChange = useCallback((newZoom) => {
@@ -412,10 +454,19 @@ export default function AudioWaveformTimeline({
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
   };
 
-  // Time ruler marks generator (every 1s major, 0.5s minor)
+  // Adaptive time ruler step (keeps DOM lightweight and fast for any duration up to hours)
+  let rulerStep = 1;
+  if (zoomLevel >= 150) {
+    rulerStep = 1;
+  } else if (zoomLevel >= 80) {
+    rulerStep = effectiveDuration > 600 ? 5 : (effectiveDuration > 180 ? 2 : 1);
+  } else if (zoomLevel >= 40) {
+    rulerStep = effectiveDuration > 1800 ? 30 : (effectiveDuration > 600 ? 10 : 5);
+  } else {
+    rulerStep = effectiveDuration > 1800 ? 60 : (effectiveDuration > 600 ? 30 : 10);
+  }
   const marks = [];
-  const step = zoomLevel >= 80 ? 1 : (zoomLevel >= 40 ? 2 : 5);
-  for (let t = 0; t <= effectiveDuration; t += step) {
+  for (let t = 0; t <= effectiveDuration; t += rulerStep) {
     marks.push(t);
   }
 
@@ -517,12 +568,21 @@ export default function AudioWaveformTimeline({
             ))}
           </div>
 
-          {/* Clean Continuous Audio Waveform Canvas */}
+          {/* Viewport-Sized Sticky Audio Waveform Canvas (Never crashes on 40+ min media) */}
           <canvas 
             ref={canvasRef}
             height={160}
-            className="absolute top-0 left-0 pointer-events-none z-0"
+            className="sticky left-0 top-0 pointer-events-none z-0 block"
+            style={{ height: '160px' }}
           />
+
+          {/* Audio Waveform Extraction Loading HUD */}
+          {(!waveformPeaks || waveformPeaks.length === 0) && isAudioLoading && (
+            <div className="sticky left-0 top-12 flex items-center justify-center gap-2 pointer-events-none z-10 w-full py-4 text-xs font-mono text-[#00e5be]">
+              <div className="w-2 h-2 rounded-full bg-[#00e5be] animate-ping" />
+              <span>Extracting acoustic waveform peaks...</span>
+            </div>
+          )}
 
           {/* ── Subtitle Boxes (CapCut Dark Studio Blocks) ── */}
           <div className="absolute top-6 bottom-0 w-full pointer-events-none z-20">

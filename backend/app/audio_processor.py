@@ -107,11 +107,38 @@ def compute_acoustic_waveform_peaks(audio_path: str, points_per_sec: int = 50) -
     Combines peak amplitude and RMS energy dynamics so speech peaks ('ups')
     and vocal pauses ('lows') match the audio and video player with millimeter accuracy.
     """
+    data = None
+    sr = 16000
     try:
         data, sr = sf.read(audio_path, dtype='float32')
         if data.ndim > 1:
             data = np.mean(data, axis=1)  # Downmix stereo to mono
-            
+    except Exception:
+        # High-speed FFmpeg pipe streaming fallback for MP4, MKV, MP3, AAC, M4A, etc.
+        try:
+            import subprocess
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+            cmd = [
+                ffmpeg_exe, "-i", str(audio_path),
+                "-vn", "-acodec", "pcm_s16le", "-ar", "8000", "-ac", "1",
+                "-f", "s16le", "-"
+            ]
+            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=90)
+            if proc.stdout and len(proc.stdout) > 0:
+                data = np.frombuffer(proc.stdout, dtype=np.int16).astype(np.float32) / 32768.0
+                sr = 8000
+        except Exception:
+            data = None
+
+    if data is None or len(data) == 0:
+        info = inspect_audio(audio_path)
+        return {
+            "duration": info.get("duration", 0.0),
+            "points_per_sec": points_per_sec,
+            "peaks": []
+        }
+
+    try:
         total_samples = len(data)
         duration = float(total_samples) / float(sr)
         
