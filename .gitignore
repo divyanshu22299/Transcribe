@@ -24,6 +24,10 @@ backend/uploads/*
 !backend/uploads/.gitkeep
 backend/exports/*
 !backend/exports/.gitkeep
+*.wav
+*.mp3
+*.mp4
+*.m4a
 
 # IDE & OS
 .vscode/

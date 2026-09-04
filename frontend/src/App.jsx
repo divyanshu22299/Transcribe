@@ -14,10 +14,28 @@ import StatsModal from './components/StatsModal';
 import SpeakerCustomizerModal from './components/SpeakerCustomizerModal';
 import DiffModal from './components/DiffModal';
 import ProjectNotesModal from './components/ProjectNotesModal';
+import LandingPage from './components/LandingPage';
+import SubtitleApp from './components/subtitle/SubtitleApp';
 import { parseSubtitles } from './utils/subtitleParser';
 import { API_BASE } from './config';
 
 export default function App() {
+  // ── Tool Selector (Landing Page Router) ──
+  const [activeTool, setActiveTool] = useState(null);
+
+  if (activeTool === null) {
+    return <LandingPage onSelect={setActiveTool} />;
+  }
+
+  if (activeTool === 'subtitle') {
+    return <SubtitleApp onBackToHome={() => setActiveTool(null)} />;
+  }
+
+  // activeTool === 'transcribe' → render the existing Transcribe UI below
+  return <TranscribeApp onBackToHome={() => setActiveTool(null)} />;
+}
+
+function TranscribeApp({ onBackToHome }) {
   const [showGuidelines, setShowGuidelines] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showSrtPreview, setShowSrtPreview] = useState(false);

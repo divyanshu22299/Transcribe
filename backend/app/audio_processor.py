@@ -101,6 +101,53 @@ def inspect_audio(audio_path: str) -> Dict[str, Any]:
     }
 
 
+def compute_acoustic_waveform_peaks(audio_path: str, points_per_sec: int = 50) -> Dict[str, Any]:
+    """
+    Extract high-precision normalized acoustic waveform peaks directly from audio.
+    Combines peak amplitude and RMS energy dynamics so speech peaks ('ups')
+    and vocal pauses ('lows') match the audio and video player with millimeter accuracy.
+    """
+    try:
+        data, sr = sf.read(audio_path, dtype='float32')
+        if data.ndim > 1:
+            data = np.mean(data, axis=1)  # Downmix stereo to mono
+            
+        total_samples = len(data)
+        duration = float(total_samples) / float(sr)
+        
+        block_size = max(1, sr // points_per_sec)
+        num_points = total_samples // block_size
+        
+        if num_points == 0:
+            return {"duration": duration, "points_per_sec": points_per_sec, "peaks": [0.02]}
+            
+        trimmed = data[:num_points * block_size].reshape(num_points, block_size)
+        peaks = np.max(np.abs(trimmed), axis=1)
+        rms = np.sqrt(np.mean(trimmed**2, axis=1))
+        
+        # Combine peak envelope (sharp transients) with RMS (speech body)
+        envelope = 0.6 * peaks + 0.4 * (rms * 2.5)
+        
+        # Normalize to 99th percentile to prevent loud spikes from crushing normal speech
+        p99 = np.percentile(envelope, 99) if len(envelope) > 0 else 1.0
+        norm_factor = p99 if p99 > 1e-4 else 1.0
+        normalized = np.clip(envelope / norm_factor, 0.02, 1.0)
+        
+        return {
+            "duration": round(duration, 3),
+            "points_per_sec": points_per_sec,
+            "peaks": [round(float(p), 4) for p in normalized]
+        }
+    except Exception as e:
+        info = inspect_audio(audio_path)
+        return {
+            "duration": info.get("duration", 0.0),
+            "points_per_sec": points_per_sec,
+            "peaks": []
+        }
+
+
+
 def detect_speech_boundaries(
     audio_path: str,
     min_silence_len_ms: int = 400,

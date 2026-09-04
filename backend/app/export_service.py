@@ -250,3 +250,120 @@ def export_rejection_csv(rejected_items: List[Dict[str, Any]]) -> str:
         ])
 
     return output.getvalue()
+
+
+def export_netflix_srt(events: list) -> str:
+    """Generate Netflix-compliant SRT format."""
+    def format_time(seconds: float) -> str:
+        if seconds is None:
+            seconds = 0.0
+        seconds = float(seconds)
+        hrs = int(seconds // 3600)
+        mins = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        millis = int(round((seconds - int(seconds)) * 1000))
+        if millis >= 1000:
+            millis -= 1000
+            secs += 1
+        return f"{hrs:02d}:{mins:02d}:{secs:02d},{millis:03d}"
+
+    entries = []
+    for i, event in enumerate(events, 1):
+        s_val = event.get("start_time", event.get("start", 0.0)) if isinstance(event, dict) else getattr(event, "start_time", getattr(event, "start", 0.0))
+        e_val = event.get("end_time", event.get("end", 0.0)) if isinstance(event, dict) else getattr(event, "end_time", getattr(event, "end", 0.0))
+        txt_val = event.get("text", "") if isinstance(event, dict) else getattr(event, "text", "")
+        
+        s_str = format_time(s_val)
+        e_str = format_time(e_val)
+        text = str(txt_val or "").replace("...", "…")
+        entries.append(f"{i}\n{s_str} --> {e_str}\n{text}\n")
+    
+    return "\n".join(entries)
+
+
+def export_netflix_vtt(events: list) -> str:
+    """Generate Netflix-compliant WebVTT format."""
+    def format_time(seconds: float) -> str:
+        if seconds is None:
+            seconds = 0.0
+        seconds = float(seconds)
+        hrs = int(seconds // 3600)
+        mins = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        millis = int(round((seconds - int(seconds)) * 1000))
+        if millis >= 1000:
+            millis -= 1000
+            secs += 1
+        return f"{hrs:02d}:{mins:02d}:{secs:02d}.{millis:03d}"
+
+    lines = ["WEBVTT\n"]
+    for i, event in enumerate(events, 1):
+        s_val = event.get("start_time", event.get("start", 0.0)) if isinstance(event, dict) else getattr(event, "start_time", getattr(event, "start", 0.0))
+        e_val = event.get("end_time", event.get("end", 0.0)) if isinstance(event, dict) else getattr(event, "end_time", getattr(event, "end", 0.0))
+        txt_val = event.get("text", "") if isinstance(event, dict) else getattr(event, "text", "")
+        
+        s_str = format_time(s_val)
+        e_str = format_time(e_val)
+        text = str(txt_val or "").replace("...", "…")
+        lines.append(f"{i}")
+        lines.append(f"{s_str} --> {e_str}")
+        lines.append(f"{text}")
+        lines.append("")
+        
+    return "\n".join(lines)
+
+
+def export_netflix_ttml(events: list, language: str = "en") -> str:
+    """Generate Netflix TTML/DFXP format."""
+    def format_time(seconds: float) -> str:
+        if seconds is None:
+            seconds = 0.0
+        seconds = float(seconds)
+        hrs = int(seconds // 3600)
+        mins = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        millis = int(round((seconds - int(seconds)) * 1000))
+        if millis >= 1000:
+            millis -= 1000
+            secs += 1
+        return f"{hrs:02d}:{mins:02d}:{secs:02d}.{millis:03d}"
+
+    xml = []
+    xml.append('<?xml version="1.0" encoding="utf-8"?>')
+    xml.append('<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" xmlns:ttp="http://www.w3.org/ns/ttml#parameter" xml:lang="' + language + '">')
+    xml.append('  <head>')
+    xml.append('    <styling>')
+    xml.append('      <style xml:id="default" tts:color="white" tts:fontFamily="sansSerif" tts:fontSize="100%" tts:textAlign="center" tts:origin="10% 10%" tts:extent="80% 80%"/>')
+    xml.append('    </styling>')
+    xml.append('    <layout>')
+    xml.append('      <region xml:id="bottomCenter" style="default" tts:origin="10% 80%" tts:extent="80% 10%"/>')
+    xml.append('      <region xml:id="topCenter" style="default" tts:origin="10% 10%" tts:extent="80% 10%"/>')
+    xml.append('    </layout>')
+    xml.append('  </head>')
+    xml.append('  <body>')
+    xml.append('    <div region="bottomCenter">')
+    
+    for event in events:
+        s_val = event.get("start_time", event.get("start", 0.0)) if isinstance(event, dict) else getattr(event, "start_time", getattr(event, "start", 0.0))
+        e_val = event.get("end_time", event.get("end", 0.0)) if isinstance(event, dict) else getattr(event, "end_time", getattr(event, "end", 0.0))
+        txt_val = event.get("text", "") if isinstance(event, dict) else getattr(event, "text", "")
+        
+        s_str = format_time(s_val)
+        e_str = format_time(e_val)
+        text = str(txt_val or "").replace("...", "…")
+        
+        # Basic escaping
+        text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        
+        # Handle italics (which are now escaped)
+        text = text.replace("&lt;i&gt;", '<span tts:fontStyle="italic">')
+        text = text.replace("&lt;/i&gt;", '</span>')
+        text = text.replace("\n", "<br/>")
+            
+        xml.append(f'      <p begin="{s_str}" end="{e_str}">{text}</p>')
+        
+    xml.append('    </div>')
+    xml.append('  </body>')
+    xml.append('</tt>')
+    
+    return "\n".join(xml)

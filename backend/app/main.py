@@ -28,6 +28,19 @@ from app.export_service import (
 from app.batch_runner import batch_manager
 from app.db import init_db, get_db_session, DBProject, DBSegment
 
+from app.video_processor import (
+    extract_audio_from_video, detect_shot_changes, get_video_metadata,
+    get_frame_rate, validate_video_file, get_supported_video_extensions
+)
+from app.netflix_linter import lint_all_subtitles, auto_fix_subtitles, optimize_line_breaks
+from app.netflix_models import (
+    SubtitleEvent, NetflixQCResult, SubtitleGenerationRequest,
+    SubtitleLintRequest, SubtitleAutoFixRequest, SubtitleExportRequest
+)
+from app.gemini_subtitle_generator import generate_subtitles, generate_subtitles_stream
+from app.export_service import export_netflix_srt, export_netflix_vtt, export_netflix_ttml
+from app.db import DBSubtitleProject, DBSubtitleEvent
+
 # In-memory storage for active sessions with TTL eviction (BUG-W2)
 active_sessions = {}
 SESSION_TTL_SECONDS = 7200  # 2 hours
@@ -90,15 +103,24 @@ app = FastAPI(
 # CORS middleware for frontend communication
 # BUG-12: In production, set ALLOWED_ORIGINS env var to your frontend domain(s).
 _raw_origins = os.getenv("ALLOWED_ORIGINS", "")
-ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()] or ["*"]
+ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+if not ALLOWED_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"^https?://.*",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=ALLOWED_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 @app.middleware("http")
@@ -896,6 +918,670 @@ async def cancel_batch_task(task_id: str):
         return {"status": "cancelled", "task_id": task_id}
     return {"status": "not_cancellable", "task_id": task_id,
             "detail": "Task already started or does not exist."}
+
+
+# --- NETFLIX SUBTITLE ENDPOINTS ---
+
+@app.post("/api/subtitle/upload")
+async def upload_video(request: Request, file: UploadFile = File(...)):
+    """Upload single video file and perform initial inspection."""
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    _check_rate_limit(client_ip)
+
+    MAX_VIDEO_UPLOAD_SIZE = 4 * 1024 * 1024 * 1024  # 4 GB
+    if file.size and file.size > MAX_VIDEO_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum supported video file size is 4GB."
+        )
+
+    ext = Path(file.filename).suffix.lower()
+    if ext not in get_supported_video_extensions():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported video format {ext}. Supported formats: {', '.join(get_supported_video_extensions())}"
+        )
+
+    unique_prefix = uuid.uuid4().hex[:8]
+    safe_filename = f"{unique_prefix}_{file.filename}"
+    file_path = UPLOAD_DIR / safe_filename
+    
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        if not validate_video_file(str(file_path)):
+            if file_path.exists():
+                file_path.unlink()
+            raise HTTPException(status_code=400, detail="Invalid or corrupt video file.")
+            
+        metadata = get_video_metadata(str(file_path))
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        if file_path.exists():
+            file_path.unlink()
+        raise HTTPException(status_code=500, detail=f"Error processing video upload: {str(e)}")
+        
+    video_id = Path(safe_filename).stem
+
+    # Pre-extract audio for instant waveform rendering and ultra-fast generation
+    audio_path = None
+    try:
+        from app.video_processor import extract_audio_from_video
+        audio_info = await asyncio.to_thread(extract_audio_from_video, str(file_path))
+        audio_path = audio_info.get("audio_path")
+    except Exception as e:
+        print(f"Non-fatal audio extraction warning during upload: {e}")
+
+    active_sessions[video_id] = {
+        "filename": safe_filename,
+        "file_path": str(file_path),
+        "audio_path": audio_path,
+        "metadata": metadata,
+        "created_at": time.time()
+    }
+
+    return {
+        "video_id": video_id,
+        "filename": safe_filename,
+        "metadata": metadata
+    }
+
+
+def resolve_active_session_video(video_id: str) -> Optional[str]:
+    """Resolve video path from in-memory active_sessions or automatically restore from disk in UPLOAD_DIR."""
+    if not video_id:
+        return None
+    if video_id in active_sessions and os.path.exists(active_sessions[video_id].get("file_path", "")):
+        return active_sessions[video_id]["file_path"]
+        
+    # Check exact stem match
+    for cand in UPLOAD_DIR.glob(f"{video_id}.*"):
+        if cand.is_file() and cand.suffix.lower() in [".mp4", ".mkv", ".mov", ".avi", ".webm"]:
+            active_sessions[video_id] = {
+                "filename": cand.name,
+                "file_path": str(cand),
+                "audio_path": str(UPLOAD_DIR / f"{video_id}.wav"),
+                "created_at": time.time()
+            }
+            return str(cand)
+
+    # Check prefix / substring match
+    matches = list(UPLOAD_DIR.glob(f"{video_id}*"))
+    video_matches = [m for m in matches if m.is_file() and m.suffix.lower() in [".mp4", ".mov", ".mkv", ".webm", ".avi"]]
+    if video_matches:
+        cand = video_matches[0]
+        active_sessions[video_id] = {
+            "filename": cand.name,
+            "file_path": str(cand),
+            "audio_path": str(UPLOAD_DIR / f"{cand.stem}.wav"),
+            "created_at": time.time()
+        }
+        return str(cand)
+
+    return None
+
+
+@app.get("/api/subtitle/waveform/{video_id}")
+async def get_subtitle_waveform_endpoint(video_id: str, points_per_sec: int = 50):
+    """Return high-precision acoustic waveform peaks for video_id matching speech ups and lows."""
+    audio_path = UPLOAD_DIR / f"{video_id}.wav"
+    
+    if not audio_path.exists():
+        video_path = resolve_active_session_video(video_id)
+        if video_path and os.path.exists(video_path):
+            try:
+                from app.video_processor import extract_audio_from_video
+                audio_info = await asyncio.to_thread(extract_audio_from_video, video_path)
+                extracted_path = audio_info.get("audio_path")
+                if extracted_path and os.path.exists(extracted_path):
+                    audio_path = Path(extracted_path)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Failed to extract audio track: {e}")
+        else:
+            raise HTTPException(status_code=404, detail="Video session or audio track not found.")
+            
+    if not audio_path.exists():
+        raise HTTPException(status_code=404, detail="Audio track not found.")
+        
+    try:
+        from app.audio_processor import compute_acoustic_waveform_peaks
+        waveform_data = await asyncio.to_thread(compute_acoustic_waveform_peaks, str(audio_path), points_per_sec)
+        waveform_data["video_id"] = video_id
+        return waveform_data
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to compute waveform: {e}")
+
+
+@app.post("/api/subtitle/generate")
+async def generate_subtitles_endpoint(payload: dict):
+    """Generate Netflix QC compliant subtitles from video with dynamic settings."""
+    video_id = payload.get("video_id")
+    language = payload.get("language", "en")
+    content_type = payload.get("content_type", "adult")
+    sdh_mode = payload.get("sdh_mode", False)
+    cpl_limit = int(payload.get("cpl_limit", 42))
+    max_cps = float(payload.get("max_cps", 20.0 if content_type == "adult" else 17.0))
+    max_lines = int(payload.get("max_lines", 2))
+    min_duration = float(payload.get("min_duration", 0.833))
+    max_duration = float(payload.get("max_duration", 7.0))
+    gemini_auto_fix = bool(payload.get("gemini_auto_fix", True))
+    
+    if not video_id:
+        raise HTTPException(status_code=400, detail="video_id is required")
+        
+    video_path = resolve_active_session_video(video_id)
+    if not video_path or not os.path.exists(video_path):
+        raise HTTPException(status_code=404, detail="Video session not found or expired. Please re-upload the video.")
+    
+    try:
+        result = await asyncio.to_thread(
+            generate_subtitles,
+            video_path=video_path,
+            language=language,
+            content_type=content_type,
+            sdh_mode=sdh_mode,
+            cpl_limit=cpl_limit,
+            max_cps=max_cps,
+            max_lines=max_lines,
+            min_duration=min_duration,
+            max_duration=max_duration,
+            gemini_auto_fix=gemini_auto_fix,
+        )
+        active_sessions[video_id]["result"] = result
+        return result
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Subtitle generation failed: {str(e)}")
+
+
+@app.post("/api/subtitle/generate_stream")
+async def generate_subtitles_stream_endpoint(payload: dict):
+    """Progressively stream subtitle batches using Server-Sent Events (SSE) with dynamic settings."""
+    video_id = payload.get("video_id")
+    language = payload.get("language", "en")
+    content_type = payload.get("content_type", "adult")
+    sdh_mode = payload.get("sdh_mode", False)
+    cpl_limit = int(payload.get("cpl_limit", 42))
+    max_cps = float(payload.get("max_cps", 20.0 if content_type == "adult" else 17.0))
+    max_lines = int(payload.get("max_lines", 2))
+    min_duration = float(payload.get("min_duration", 0.833))
+    max_duration = float(payload.get("max_duration", 7.0))
+    gemini_auto_fix = bool(payload.get("gemini_auto_fix", True))
+    
+    if not video_id:
+        raise HTTPException(status_code=400, detail="video_id is required")
+        
+    video_path = resolve_active_session_video(video_id)
+    if not video_path or not os.path.exists(video_path):
+        raise HTTPException(status_code=404, detail="Video session not found or expired. Please re-upload the video.")
+    
+    return StreamingResponse(
+        generate_subtitles_stream(
+            video_path=video_path,
+            language=language,
+            content_type=content_type,
+            sdh_mode=sdh_mode,
+            cpl_limit=cpl_limit,
+            max_cps=max_cps,
+            max_lines=max_lines,
+            min_duration=min_duration,
+            max_duration=max_duration,
+            gemini_auto_fix=gemini_auto_fix,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+@app.post("/api/subtitle/lint")
+async def lint_subtitles_endpoint(payload: SubtitleLintRequest):
+    """Lint subtitles for Netflix QC compliance with dynamic custom settings."""
+    try:
+        # Convert events to list of dicts safely
+        events_dicts = [
+            e.model_dump() if hasattr(e, "model_dump") else (dict(e) if isinstance(e, dict) else e.__dict__)
+            for e in payload.events
+        ]
+        
+        lint_result = lint_all_subtitles(
+            events=events_dicts,
+            shot_changes=payload.shot_changes,
+            content_type=payload.content_type,
+            frame_rate=payload.frame_rate,
+            custom_cpl=getattr(payload, "custom_cpl", None),
+            custom_cps=getattr(payload, "custom_cps", None),
+            custom_max_lines=getattr(payload, "custom_max_lines", None),
+            custom_min_duration=getattr(payload, "custom_min_duration", None),
+            custom_max_duration=getattr(payload, "custom_max_duration", None),
+        )
+        
+        return lint_result
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/subtitle/gemini_fix")
+async def gemini_fix_subtitles_endpoint(payload: dict):
+    """Coordinate with Gemini AI to fix QC violations (CPL, CPS, line breaks)."""
+    video_id = payload.get("video_id")
+    events = payload.get("events", [])
+    content_type = payload.get("content_type", "adult")
+    frame_rate = float(payload.get("frame_rate", 24.0))
+    cpl_limit = int(payload.get("cpl_limit", 42))
+    max_cps = float(payload.get("max_cps", 20.0 if content_type == "adult" else 17.0))
+    max_lines = int(payload.get("max_lines", 2))
+    min_duration = float(payload.get("min_duration", 0.833))
+    max_duration = float(payload.get("max_duration", 7.0))
+    shot_changes = payload.get("shot_changes", [])
+
+    whisper_words = None
+    if video_id:
+        video_path = resolve_active_session_video(video_id) or ""
+        audio_path = os.path.splitext(video_path)[0] + ".wav" if video_path else ""
+        if os.path.exists(audio_path):
+            try:
+                from app.whisper_aligner import get_whisper_word_timestamps
+                whisper_words = await asyncio.to_thread(get_whisper_word_timestamps, audio_path)
+            except Exception:
+                pass
+
+    try:
+        from app.gemini_qc_fixer import coordinate_gemini_qc_fix
+        result = await asyncio.to_thread(
+            coordinate_gemini_qc_fix,
+            events=events,
+            whisper_words=whisper_words,
+            shot_changes=shot_changes,
+            content_type=content_type,
+            frame_rate=frame_rate,
+            cpl_limit=cpl_limit,
+            max_cps=max_cps,
+            max_lines=max_lines,
+            min_duration=min_duration,
+            max_duration=max_duration,
+        )
+        return result
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Gemini QC Fix failed: {str(e)}")
+
+
+@app.post("/api/subtitle/autofix")
+async def autofix_subtitles_endpoint(payload: SubtitleAutoFixRequest):
+    """Auto-fix subtitle errors for Netflix QC compliance."""
+    try:
+        events_dicts = [
+            e.model_dump() if hasattr(e, "model_dump") else (dict(e) if isinstance(e, dict) else e.__dict__)
+            for e in payload.events
+        ]
+        fixed_events = auto_fix_subtitles(
+            events=events_dicts,
+            shot_changes=payload.shot_changes,
+            content_type=payload.content_type,
+            frame_rate=payload.frame_rate,
+            custom_cpl=payload.custom_cpl,
+            custom_cps=payload.custom_cps,
+            custom_max_lines=payload.custom_max_lines,
+            custom_min_duration=payload.custom_min_duration,
+            custom_max_duration=payload.custom_max_duration
+        )
+        return {"events": fixed_events}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/subtitle/export")
+async def export_subtitles_endpoint(payload: SubtitleExportRequest):
+    """Export subtitles to requested format."""
+    try:
+        events_dicts = [
+            e.model_dump() if hasattr(e, "model_dump") else (dict(e) if isinstance(e, dict) else e.__dict__)
+            for e in payload.events
+        ]
+        format = payload.format.lower()
+        filename = payload.filename or "subtitles"
+        language = payload.language or "en"
+        base_name = Path(filename).stem
+        
+        if format == "srt":
+            content = export_netflix_srt(events_dicts)
+            media_type = "text/plain; charset=utf-8"
+            ext = "srt"
+        elif format == "vtt":
+            content = export_netflix_vtt(events_dicts)
+            media_type = "text/vtt; charset=utf-8"
+            ext = "vtt"
+        elif format == "ttml":
+            content = export_netflix_ttml(events_dicts, language)
+            media_type = "application/xml"
+            ext = "ttml"
+        elif format == "txt":
+            content = "\n\n".join([e.get("text", "") for e in events_dicts])
+            media_type = "text/plain; charset=utf-8"
+            ext = "txt"
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported export format: {format}")
+            
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{base_name}.{ext}"'}
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/subtitle/video/{filename}")
+async def get_video_stream(request: Request, filename: str):
+    """Stream video file for player with Range requests support."""
+    file_path = UPLOAD_DIR / filename
+    if not file_path.exists():
+        matches = list(UPLOAD_DIR.glob(f"{filename}*"))
+        if matches:
+            file_path = matches[0]
+        else:
+            raise HTTPException(status_code=404, detail="Video file not found.")
+
+    file_size = file_path.stat().st_size
+    range_header = request.headers.get("Range")
+
+    suffix = file_path.suffix.lower()
+    media_type = "video/mp4"
+    if suffix == ".webm":
+        media_type = "video/webm"
+    elif suffix == ".mkv":
+        media_type = "video/x-matroska"
+        
+    if range_header:
+        range_match = range_header.replace("bytes=", "").split("-")
+        start = int(range_match[0]) if range_match[0] else 0
+        end = int(range_match[1]) if len(range_match) > 1 and range_match[1] else file_size - 1
+        
+        start = max(0, min(start, file_size - 1))
+        end = max(start, min(end, file_size - 1))
+        
+        chunk_size = (end - start) + 1
+        
+        def iterfile():
+            with open(file_path, "rb") as f:
+                f.seek(start)
+                remaining = chunk_size
+                while remaining > 0:
+                    chunk = f.read(min(remaining, 65536))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
+                
+        headers = {
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(chunk_size),
+            "Content-Type": media_type,
+        }
+        return StreamingResponse(iterfile(), status_code=206, headers=headers)
+    else:
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+            "Content-Type": media_type,
+        }
+        return FileResponse(file_path, headers=headers, media_type=media_type)
+
+
+@app.post("/api/subtitle/rebreak")
+async def rebreak_subtitles_endpoint(payload: dict):
+    """Optimize line breaks for subtitles."""
+    try:
+        events_raw = payload.get("events", [])
+        max_cpl = payload.get("max_cpl", 42)
+        
+        updated_events = []
+        for event in events_raw:
+            if isinstance(event, dict):
+                text = event.get("text", "")
+                event["text"] = optimize_line_breaks(text, max_cpl)
+                updated_events.append(event)
+            else:
+                event.text = optimize_line_breaks(event.text, max_cpl)
+                updated_events.append(event)
+                
+        return {"events": updated_events}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _save_subtitle_project_to_db(payload: dict):
+    session = get_db_session()
+    if not session:
+        raise ValueError("Database not initialized")
+    try:
+        project_data = payload.get("project", {})
+        if not project_data:
+            # Fallback to direct payload
+            project_data = payload
+            
+        proj_id = project_data.get("video_id") or str(uuid.uuid4())[:8]
+        filename = project_data.get("filename") or "video_subtitle.mp4"
+
+        db_proj = session.query(DBSubtitleProject).filter(DBSubtitleProject.id == proj_id).first()
+        if not db_proj:
+            db_proj = DBSubtitleProject(
+                id=proj_id,
+                filename=filename,
+                language=project_data.get("language", "en"),
+                content_type=project_data.get("content_type", "adult"),
+                duration=float(project_data.get("metadata", {}).get("duration", 0.0)),
+                compliance_score=float(project_data.get("compliance_score", 100.0)),
+                total_errors=int(project_data.get("total_errors", 0)),
+                total_warnings=int(project_data.get("total_warnings", 0)),
+                video_metadata=json.dumps(project_data.get("metadata", {})),
+                shot_changes=json.dumps(project_data.get("shot_changes", []))
+            )
+            session.add(db_proj)
+        else:
+            db_proj.filename = filename
+            db_proj.language = project_data.get("language", db_proj.language)
+            db_proj.content_type = project_data.get("content_type", db_proj.content_type)
+            db_proj.compliance_score = float(project_data.get("compliance_score", db_proj.compliance_score))
+            db_proj.total_errors = int(project_data.get("total_errors", db_proj.total_errors))
+            db_proj.total_warnings = int(project_data.get("total_warnings", db_proj.total_warnings))
+            session.query(DBSubtitleEvent).filter(DBSubtitleEvent.project_id == db_proj.id).delete()
+
+        raw_events = project_data.get("events", [])
+        for ev in raw_events:
+            qc_errors_data = json.dumps(ev.get("qc_errors", []), ensure_ascii=False)
+            db_ev = DBSubtitleEvent(
+                project_id=proj_id,
+                event_id=int(ev.get("event_id", 1)),
+                start_time=float(ev.get("start_time", 0.0)),
+                end_time=float(ev.get("end_time", 2.0)),
+                duration=float(ev.get("duration", 2.0)),
+                text=str(ev.get("text", "")),
+                qc_errors_data=qc_errors_data,
+                is_valid=bool(ev.get("is_valid", True))
+            )
+            session.add(db_ev)
+
+        session.commit()
+        return proj_id
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@app.post("/api/subtitle/projects/save")
+async def save_subtitle_project(payload: dict):
+    """Save or update subtitle project into DB."""
+    try:
+        proj_id = await asyncio.to_thread(_save_subtitle_project_to_db, payload)
+        return {"status": "success", "project_id": proj_id}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"status": "error", "message": str(e)}
+
+
+def _list_subtitle_projects_from_db():
+    session = get_db_session()
+    if not session:
+        return []
+    try:
+        projects = session.query(DBSubtitleProject).order_by(DBSubtitleProject.updated_at.desc()).all()
+        result = []
+        for p in projects:
+            result.append({
+                "id": p.id,
+                "filename": p.filename,
+                "language": p.language,
+                "content_type": p.content_type,
+                "duration": p.duration,
+                "compliance_score": p.compliance_score,
+                "total_errors": p.total_errors,
+                "total_warnings": p.total_warnings,
+                "event_count": len(p.events),
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+                "updated_at": p.updated_at.isoformat() if p.updated_at else None
+            })
+        return result
+    finally:
+        session.close()
+
+
+@app.get("/api/subtitle/projects")
+async def list_subtitle_projects():
+    """List all saved subtitle projects from DB."""
+    try:
+        projects = await asyncio.to_thread(_list_subtitle_projects_from_db)
+        return {"projects": projects}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"projects": [], "error": str(e)}
+
+
+def _get_subtitle_project_details_from_db(project_id: str):
+    session = get_db_session()
+    if not session:
+        raise ValueError("Database not available")
+    try:
+        proj = session.query(DBSubtitleProject).filter(DBSubtitleProject.id == project_id).first()
+        if not proj:
+            return None
+
+        events_out = []
+        for e in proj.events:
+            qc_errors = []
+            if e.qc_errors_data:
+                try:
+                    qc_errors = json.loads(e.qc_errors_data)
+                except Exception:
+                    pass
+
+            events_out.append({
+                "event_id": e.event_id,
+                "start_time": e.start_time,
+                "end_time": e.end_time,
+                "duration": e.duration,
+                "text": e.text,
+                "qc_errors": qc_errors,
+                "is_valid": e.is_valid
+            })
+
+        metadata_parsed = {}
+        if proj.video_metadata:
+            try:
+                metadata_parsed = json.loads(proj.video_metadata)
+            except Exception:
+                pass
+                
+        shot_changes_parsed = []
+        if proj.shot_changes:
+            try:
+                shot_changes_parsed = json.loads(proj.shot_changes)
+            except Exception:
+                pass
+
+        return {
+            "video_id": proj.id,
+            "filename": proj.filename,
+            "language": proj.language,
+            "content_type": proj.content_type,
+            "duration": proj.duration,
+            "compliance_score": proj.compliance_score,
+            "total_errors": proj.total_errors,
+            "total_warnings": proj.total_warnings,
+            "metadata": metadata_parsed,
+            "shot_changes": shot_changes_parsed,
+            "events": events_out
+        }
+    finally:
+        session.close()
+
+
+@app.get("/api/subtitle/projects/{project_id}")
+async def get_subtitle_project_details(project_id: str):
+    """Retrieve full subtitle project details with all events from DB."""
+    try:
+        data = await asyncio.to_thread(_get_subtitle_project_details_from_db, project_id)
+        if not data:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return data
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _delete_subtitle_project_from_db(project_id: str):
+    session = get_db_session()
+    if not session:
+        raise ValueError("Database not available")
+    try:
+        session.query(DBSubtitleProject).filter(DBSubtitleProject.id == project_id).delete()
+        session.commit()
+        return True
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@app.delete("/api/subtitle/projects/{project_id}")
+async def delete_subtitle_project(project_id: str):
+    """Delete subtitle project from DB."""
+    try:
+        await asyncio.to_thread(_delete_subtitle_project_from_db, project_id)
+        return {"status": "success", "deleted_id": project_id}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.delete("/api/cleanup/{audio_id}")
