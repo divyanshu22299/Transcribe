@@ -618,7 +618,39 @@ def heal_cross_event_dangling_phrases(events: List[Dict[str, Any]], cpl_limit: i
     return events
 
 
-def split_and_balance_event(ev: Dict[str, Any], cpl_limit: int = 42, max_lines: int = 2) -> List[Dict[str, Any]]:
+def snap_split_time_to_acoustic_pause(audio_path: Optional[str], approx_time: float, search_radius: float = 0.8) -> float:
+    """Finds the local acoustic silence valley (lowest RMS energy) around approx_time so splits never cut words."""
+    if not audio_path or not os.path.exists(audio_path):
+        return approx_time
+    try:
+        info = sf.info(audio_path)
+        sr = info.samplerate
+        total_sec = info.duration
+        s_sec = max(0.0, approx_time - search_radius)
+        e_sec = min(total_sec, approx_time + search_radius)
+        if e_sec <= s_sec + 0.1:
+            return approx_time
+        start_frame = int(s_sec * sr)
+        stop_frame = int(e_sec * sr)
+        data, _ = sf.read(audio_path, start=start_frame, stop=stop_frame, dtype='float32')
+        if data.ndim > 1:
+            data = np.mean(data, axis=1)
+        frame_len = int(sr * 0.04)
+        hop_len = int(sr * 0.01)
+        if len(data) < frame_len + hop_len:
+            return approx_time
+        num_hops = (len(data) - frame_len) // hop_len
+        strided = np.lib.stride_tricks.sliding_window_view(data[:num_hops * hop_len + frame_len], frame_len)[::hop_len]
+        energies = np.sqrt(np.mean(strided**2, axis=1))
+        cand_times = s_sec + (np.arange(len(energies)) * 0.01)
+        dist_pen = np.abs(cand_times - approx_time) * (np.max(energies) - np.min(energies) + 1e-6) * 0.4
+        best_idx = int(np.argmin(energies + dist_pen))
+        return round(float(cand_times[best_idx]), 3)
+    except Exception:
+        return approx_time
+
+
+def split_and_balance_event(ev: Dict[str, Any], cpl_limit: int = 42, max_lines: int = 2, audio_path: Optional[str] = None) -> List[Dict[str, Any]]:
     """Recursively split and balance a subtitle event so NO event exceeds max_lines or cpl_limit."""
     text = ev.get('text', '').strip().replace('...', '…')
     words = text.replace('\n', ' ').split()
@@ -673,6 +705,11 @@ def split_and_balance_event(ev: Dict[str, Any], cpl_limit: int = 42, max_lines: 
     
     dur_a = max(0.833, round(dur * ratio_a, 3))
     split_time = round(st + dur_a, 3)
+
+    # Snap split point to natural acoustic pause between words
+    if audio_path:
+        split_time = snap_split_time_to_acoustic_pause(audio_path, split_time)
+
     if split_time >= et - 0.833:
         split_time = round(et - 0.833, 3)
         
@@ -687,8 +724,8 @@ def split_and_balance_event(ev: Dict[str, Any], cpl_limit: int = 42, max_lines: 
     ev_b['end_time'] = et
     
     # Recursively format sub-events
-    res_a = split_and_balance_event(ev_a, cpl_limit=cpl_limit, max_lines=max_lines)
-    res_b = split_and_balance_event(ev_b, cpl_limit=cpl_limit, max_lines=max_lines)
+    res_a = split_and_balance_event(ev_a, cpl_limit=cpl_limit, max_lines=max_lines, audio_path=audio_path)
+    res_b = split_and_balance_event(ev_b, cpl_limit=cpl_limit, max_lines=max_lines, audio_path=audio_path)
     return res_a + res_b
 
 
@@ -1481,6 +1518,10 @@ async def generate_subtitles_stream(
     frame_rate = 24.0
 
     try:
+        # Immediate handshake ping to flush HTTP 200 headers and prevent reverse proxy idle timeouts
+        yield ": ping - connection established\n\n"
+        yield f"data: {json.dumps({'type': 'init_start', 'stage': 'Initializing media pipeline...'})}\n\n"
+
         # 1. Extract audio
         audio_info = await asyncio.to_thread(extract_audio_from_video, video_path)
         audio_path_out = audio_info.get("audio_path")
@@ -1574,33 +1615,8 @@ async def generate_subtitles_stream(
                 target_path = audio_path_out
 
             try:
-                # For long audio (> 180s), run Whisper specifically on this slice (if enabled)
+                # Initialize per-slice Whisper words (will run during Stage 3 after Gemini transcribes)
                 chunk_whisper_words = []
-                if enable_whisper and total_duration > 180.0 and total_chunks > 1:
-                    try:
-                        raw_cw = []
-                        async for item in execute_task_with_heartbeats(
-                            get_whisper_word_timestamps,
-                            target_path,
-                            resolved_language,
-                            whisper_model,
-                            chunk_idx=chunk_idx,
-                            total_chunks=total_chunks,
-                            stage=f"Whisper ({whisper_model}) aligning Part {chunk_idx}"
-                        ):
-                            if isinstance(item, tuple) and item[0] == "__RESULT__":
-                                raw_cw = item[1]
-                            else:
-                                yield item
-                        for w in raw_cw:
-                            chunk_whisper_words.append({
-                                "word": w["word"],
-                                "start": round(w["start"] + chunk_s, 3),
-                                "end": round(w["end"] + chunk_s, 3),
-                                "probability": w.get("probability", 1.0)
-                            })
-                    except Exception as e:
-                        log_terminal(f"Batch {chunk_idx} Whisper alignment warning: {e}")
                 
                 # Read chunk audio bytes directly (well within 20MB inline limit)
                 with open(target_path, "rb") as f:
@@ -1743,7 +1759,7 @@ async def generate_subtitles_stream(
                 # Stage 1B: Pre-split any oversized events that exceed 2 lines or cpl_limit (ZERO words dropped)
                 split_batch = []
                 for s in batch_raw:
-                    split_batch.extend(split_and_balance_event(s, cpl_limit=cpl_limit, max_lines=max_lines))
+                    split_batch.extend(split_and_balance_event(s, cpl_limit=cpl_limit, max_lines=max_lines, audio_path=target_path))
 
                 # Stage 2: Automated Quality Check
                 batch_lint = lint_all_subtitles(
@@ -1793,7 +1809,35 @@ async def generate_subtitles_stream(
                         log_terminal(f"Batch {chunk_idx} Gemini QC fix warning: {qc_err}")
 
                 # Stage 3: Whisper Acoustic Synchronization (preserving overlapping dialogues)
-                active_words = chunk_whisper_words if chunk_whisper_words else [w for w in whisper_words if w["start"] >= chunk_s - 0.5 and w["end"] <= chunk_e + 0.5]
+                active_words = []
+                if enable_whisper and total_duration > 180.0 and total_chunks > 1:
+                    try:
+                        raw_cw = []
+                        async for item in execute_task_with_heartbeats(
+                            get_whisper_word_timestamps,
+                            target_path,
+                            resolved_language,
+                            whisper_model,
+                            chunk_idx=chunk_idx,
+                            total_chunks=total_chunks,
+                            stage=f"Whisper ({whisper_model}) acoustic snapping for Part {chunk_idx}"
+                        ):
+                            if isinstance(item, tuple) and item[0] == "__RESULT__":
+                                raw_cw = item[1]
+                            else:
+                                yield item
+                        for w in raw_cw:
+                            active_words.append({
+                                "word": w["word"],
+                                "start": round(w["start"] + chunk_s, 3),
+                                "end": round(w["end"] + chunk_s, 3),
+                                "probability": w.get("probability", 1.0)
+                            })
+                    except Exception as e:
+                        log_terminal(f"Batch {chunk_idx} Whisper alignment fallback: {e}")
+                elif whisper_words:
+                    active_words = [w for w in whisper_words if w["start"] >= chunk_s - 0.5 and w["end"] <= chunk_e + 0.5]
+
                 if active_words and split_batch:
                     log_terminal(f"Batch {chunk_idx}: Synchronizing {len(split_batch)} events acoustically with Whisper ({whisper_model})...")
                     split_batch = align_subtitle_timestamps(split_batch, active_words, search_radius=8.0, prev_batch_end=prev_batch_end)

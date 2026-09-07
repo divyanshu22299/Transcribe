@@ -139,7 +139,8 @@ def get_whisper_word_timestamps(
     log_terminal(f"Running Whisper on audio: {audio_path} (language={language or 'auto'})...")
 
     import torch
-    torch.set_num_threads(os.cpu_count() or 8)
+    is_cloud = bool(os.getenv("RENDER") or os.getenv("PORT"))
+    torch.set_num_threads(1 if is_cloud else min(4, os.cpu_count() or 4))
 
     # Fast acoustic alignment transcribe options (greedy search is 3-4x faster on CPU)
     transcribe_opts = {
@@ -162,15 +163,22 @@ def get_whisper_word_timestamps(
         if len(data.shape) > 1:
             data = data.mean(axis=1)  # downmix stereo to mono
         if sr != 16000:
-            from scipy.signal import resample
-            num_samples = int(len(data) * 16000 / sr)
-            data = resample(data, num_samples).astype(np.float32)
+            new_samples = int(len(data) * 16000 / sr)
+            data = np.interp(
+                np.linspace(0, len(data), new_samples, endpoint=False),
+                np.arange(len(data)),
+                data
+            ).astype(np.float32)
         audio_input = data
     except Exception as read_err:
         log_terminal(f"soundfile direct read fallback: {read_err}")
         audio_input = audio_path
 
-    result = model.transcribe(audio_input, **transcribe_opts)
+    try:
+        result = model.transcribe(audio_input, **transcribe_opts)
+    finally:
+        import gc
+        gc.collect()
 
     # Extract flat word list from all segments
     words = []

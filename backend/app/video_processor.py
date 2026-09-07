@@ -150,11 +150,23 @@ def extract_audio_from_video(video_path: str, output_path: str = None) -> dict:
     base_path = os.path.splitext(video_path)[0]
     ext = Path(video_path).suffix.lower()
 
+    # If file is already a valid WAV audio file, reuse directly in 0.001s without invoking FFmpeg
+    if ext == ".wav" and os.path.exists(video_path):
+        try:
+            import soundfile as sf
+            info = sf.info(video_path)
+            if info.frames > 0 and info.samplerate > 0:
+                return {
+                    "audio_path": str(video_path),
+                    "duration": float(info.duration),
+                    "sample_rate": info.samplerate,
+                    "channels": info.channels
+                }
+        except Exception:
+            pass
+
     if output_path is None:
-        if ext == ".wav":
-            output_path = f"{base_path}_audio.wav"
-        else:
-            output_path = f"{base_path}.wav"
+        output_path = f"{base_path}_audio.wav" if ext == ".wav" else f"{base_path}.wav"
 
     # Reuse previously extracted audio if it exists and is valid
     if Path(output_path).exists() and Path(output_path).stat().st_size > 1000:
