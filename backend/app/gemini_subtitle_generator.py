@@ -40,7 +40,8 @@ class SubtitleItemSchema(BaseModel):
     start_time: str = Field(description="Subtitle onset timestamp HH:MM:SS.mmm")
     end_time: str = Field(description="Subtitle offset timestamp HH:MM:SS.mmm")
     text: str = Field(description="Exact verbatim spoken words line 1\\nExact line 2 if two lines")
-    speakers: List[str] = Field(default_factory=lambda: ["Speaker 1"], description="List of speaker names")
+    speaker: str = Field(default="Speaker 1", description="Single speaker identity vocalizing this event. Every speaker change MUST be a separate subtitle event!")
+    speakers: List[str] = Field(default_factory=lambda: ["Speaker 1"], description="List with exactly one speaker name")
     is_italic: bool = Field(default=False, description="True for off-screen, voiceover, phone, lyrics")
     is_forced_narrative: bool = Field(default=False, description="True for translated foreign signs or forced dialogue")
 
@@ -383,31 +384,86 @@ def get_gemini_client(api_key: Optional[str] = None) -> genai.Client:
     return genai.Client(api_key=key)
 
 
+def resolve_batch_timestamps(
+    subs: List[Dict[str, Any]],
+    chunk_s: float,
+    chunk_e: float,
+    prev_batch_end: float = 0.0,
+    min_gap_sec: float = 0.083
+) -> List[Dict[str, Any]]:
+    """
+    Accurately maps Gemini subtitle timestamps to absolute video timeline.
+    Detects whether Gemini outputted slice-relative timestamps (0.0 to chunk_dur)
+    or absolute timestamps across the entire batch, completely eliminating backwards jumping,
+    timeline gaps, and collisions.
+    """
+    if not subs:
+        return []
+
+    from app.audio_processor import parse_timestamp
+
+    parsed_items = []
+    for s in subs:
+        st_val = s.get("start_time", 0.0)
+        et_val = s.get("end_time", 2.0)
+        st_sec = parse_timestamp(st_val) if isinstance(st_val, str) else float(st_val)
+        et_sec = parse_timestamp(et_val) if isinstance(et_val, str) else float(et_val)
+        if et_sec <= st_sec:
+            et_sec = round(st_sec + 1.8, 3)
+        parsed_items.append((st_sec, et_sec, s))
+
+    first_st = parsed_items[0][0]
+
+    # If chunk_s > 10.0 and first_st is near zero (< chunk_s - 5.0), the entire batch is SLICE-RELATIVE!
+    is_slice_relative = (chunk_s > 10.0 and first_st < (chunk_s - 5.0)) or (chunk_s <= 10.0)
+
+    resolved = []
+    current_cursor = prev_batch_end + min_gap_sec if prev_batch_end > 0.0 else 0.0
+
+    for st_sec, et_sec, orig_s in parsed_items:
+        if is_slice_relative:
+            abs_st = round(chunk_s + st_sec, 3)
+            abs_et = round(chunk_s + et_sec, 3)
+        else:
+            abs_st = round(st_sec, 3)
+            abs_et = round(et_sec, 3)
+
+        dur = max(0.833, round(abs_et - abs_st, 3))
+
+        # Enforce strictly sequential non-overlapping timeline with previous events
+        if abs_st < current_cursor:
+            abs_st = round(current_cursor, 3)
+            abs_et = round(abs_st + dur, 3)
+
+        current_cursor = abs_et + min_gap_sec
+
+        spk = orig_s.get("speaker") or (orig_s.get("speakers") or ["Speaker 1"])[0]
+
+        item = {
+            "start_time": abs_st,
+            "end_time": abs_et,
+            "start": abs_st,
+            "end": abs_et,
+            "text": orig_s.get("text", "").strip(),
+            "speakers": [spk],
+            "speaker_count": 1,
+            "is_italic": bool(orig_s.get("is_italic", False)),
+            "is_forced_narrative": bool(orig_s.get("is_forced_narrative", False))
+        }
+        resolved.append(item)
+
+    return resolved
+
+
 def resolve_chunk_timestamp(ts_val: Any, chunk_s: float, chunk_e: float) -> float:
-    """
-    Accurately maps Gemini timestamp to video timeline without modulo-60 distortion.
-    Handles both chunk-relative timestamps (0.0 to chunk_dur) and absolute timestamps.
-    """
+    """Safe fallback single timestamp resolver."""
     from app.audio_processor import parse_timestamp
     sec = parse_timestamp(ts_val) if isinstance(ts_val, str) else float(ts_val)
-    chunk_dur = max(0.01, chunk_e - chunk_s)
-
-    # 1. Check if Gemini already outputted an absolute timestamp on the video timeline
-    if chunk_s > 5.0 and (chunk_s - 2.0 <= sec <= chunk_e + 15.0):
-        # Already absolute!
-        return round(max(chunk_s, min(chunk_e, sec)), 3)
-
-    # 2. Check if timestamp is chunk-relative within normal chunk duration
-    if 0.0 <= sec <= chunk_dur + 2.0:
-        return round(chunk_s + min(chunk_dur, sec), 3)
-
-    # 3. Fallback if Gemini hallucinated broadcast minute (e.g. 01:00:15 instead of 00:00:15 in a slice)
-    # Never modulo 60 blindly! Check if removing an offset fits nicely within chunk_dur
-    if sec > chunk_dur:
-        shifted = sec % chunk_dur
-        return round(chunk_s + shifted, 3)
-
-    return round(chunk_s + max(0.0, sec), 3)
+    if chunk_s > 10.0 and sec < (chunk_s - 5.0):
+        return round(chunk_s + sec, 3)
+    elif chunk_s <= 10.0:
+        return round(chunk_s + sec, 3)
+    return round(sec, 3)
 
 
 def repair_chunk_timestamp(ts_val: Any, chunk_dur: float) -> float:
@@ -422,6 +478,8 @@ def repair_chunk_timestamp(ts_val: Any, chunk_dur: float) -> float:
 def balance_text_to_lines(text: str, cpl_limit: int = 42, max_lines: int = 2) -> List[str]:
     """Balance text into 1 or 2 lines where each line is <= cpl_limit without dropping words or creating bad breaks."""
     text = text.replace('...', '…')
+    raw_lines = [l.strip() for l in text.split('\n') if l.strip()]
+
     words = text.replace('\n', ' ').split()
     if not words:
         return []
@@ -431,30 +489,36 @@ def balance_text_to_lines(text: str, cpl_limit: int = 42, max_lines: int = 2) ->
     if max_lines == 1:
         return []
 
-    # If text has dual-speaker hyphens already, preserve the lines if <= cpl_limit
-    raw_lines = [l.strip() for l in text.split('\n') if l.strip()]
-    if len(raw_lines) == 2 and all(l.startswith('-') for l in raw_lines):
-        if all(len(l) <= cpl_limit for l in raw_lines):
-            return raw_lines
-
-    best_lines = None
-    min_penalty = 999999
     bad_ends = {
         'a', 'an', 'the', 'mr.', 'mrs.', 'ms.', 'dr.', 'prof.', 'mr', 'mrs', 'ms', 'dr',
         'my', 'his', 'her', 'our', 'their', 'its', 'your', 'this', 'that', 'these', 'those',
         'wrong', 'other', 'new', 'old', 'into', 'of', 'to', 'in', 'at', 'from', 'with',
         'i', 'he', 'she', 'we', 'they', 'it',
         # Hindi titles & honorifics - never sever from name
-        'श्री', 'श्रीमती', 'सुश्री', 'डॉक्टर', 'डॉ.', 'डॉ', 'पंडित', 'पं.', 'पं', 'shri', 'smt', 'pandit'
+        'श्री', 'श्रीमती', 'सुश्री', 'डॉक्टर', 'डॉ.', 'डॉ', 'पंडित', 'पं.', 'पं', 'shri', 'smt', 'pandit',
+        # Hindi postpositions - NEVER end line 1 with a dangling postposition!
+        'ने', 'को', 'से', 'का', 'के', 'की', 'में', 'पर', 'पे', 'तक', 'लिए', 'साथ',
+        'ne', 'ko', 'se', 'ka', 'ke', 'ki', 'mein', 'me', 'par', 'pe', 'tak', 'liye', 'saath'
     }
     bad_starts = {
         # Hindi postpositions - must NEVER start line 2 alone!
         'ने', 'को', 'से', 'का', 'के', 'की', 'में', 'पर', 'पे', 'तक', 'लिए', 'साथ', 'द्वारा', 'वाला', 'वाले', 'वाली',
         'ne', 'ko', 'se', 'ka', 'ke', 'ki', 'mein', 'me', 'par', 'pe', 'tak', 'liye', 'saath', 'dwara', 'wala', 'wale', 'wali',
         # Hindi auxiliaries when severed
-        'है', 'हैं', 'था', 'थी', 'थे', 'होगा', 'होगी', 'होंगे', 'रहा', 'रही', 'रहे',
-        'hai', 'hain', 'tha', 'thi', 'the', 'hoga', 'hogi', 'honge', 'raha', 'rahi', 'rahe'
+        'है', 'हैं', 'था', 'थी', 'थे', 'होगा', 'होगी', 'होंगे', 'रहा', 'रही', 'रहे', 'सकता', 'सकती', 'सकते',
+        'hai', 'hain', 'tha', 'thi', 'the', 'hoga', 'hogi', 'honge', 'raha', 'rahi', 'rahe', 'sakta', 'sakti', 'sakte'
     }
+
+    # If already 2 lines provided by AI/editor that fit CPL and don't violate grammar, preserve them!
+    if len(raw_lines) == 2 and all(len(l) <= cpl_limit for l in raw_lines):
+        first_w_l2 = raw_lines[1].split()[0].lower().rstrip('.,!?:;--…।॥') if raw_lines[1].split() else ""
+        last_w_l1 = raw_lines[0].split()[-1].lower().rstrip('.,!?:;--…।॥') if raw_lines[0].split() else ""
+        if first_w_l2 not in bad_starts and last_w_l1 not in bad_ends:
+            return raw_lines
+
+    best_lines = None
+    min_penalty = 999999
+
     prepositions_and_conjunctions = {
         'and', 'but', 'or', 'so', 'because', 'although', 'while', 'when', 'if',
         'through', 'into', 'under', 'between', 'after', 'before', 'about', 'over', 'by', 'from', 'with',
@@ -468,21 +532,21 @@ def balance_text_to_lines(text: str, cpl_limit: int = 42, max_lines: int = 2) ->
         l2 = ' '.join(words[i:])
         if len(l1) <= cpl_limit and len(l2) <= cpl_limit:
             diff = abs(len(l1) - len(l2))
-            penalty = diff * 0.4  # Lower weight on raw visual difference
+            penalty = diff * 0.3
 
             last_w = words[i - 1].lower().rstrip('.,!?:;--…।॥')
             first_w = words[i].lower().rstrip('.,!?:;--…।॥')
 
             if last_w in bad_ends:
-                penalty += 1000  # Strictly forbid breaking after articles, titles, adjectives, pronouns
+                penalty += 2000  # Strictly forbid breaking after articles, titles, postpositions
 
             if first_w in bad_starts:
-                penalty += 1500  # Strictly forbid starting line 2 with a postposition or severed auxiliary!
+                penalty += 3000  # Strictly forbid starting line 2 with a postposition or severed auxiliary!
 
             if l1.endswith((',', ';', '.', '!', '?', '--', '…', ':', '।', '॥')):
-                penalty -= 45   # Strongest preference for natural punctuation breaks (including Hindi । and ॥)
+                penalty -= 80   # Strongest preference for natural punctuation breaks (including Hindi । and ॥)
             elif first_w in prepositions_and_conjunctions:
-                penalty -= 30   # Strong preference for breaking before prepositions and conjunctions
+                penalty -= 50   # Strong preference for breaking before prepositions and conjunctions
 
             if penalty < min_penalty:
                 min_penalty = penalty
@@ -580,15 +644,21 @@ def split_and_balance_event(ev: Dict[str, Any], cpl_limit: int = 42, max_lines: 
         pen = abs(cum - target_mid)
         prev_w = words[i - 1]
         next_w = words[i].lower().rstrip('.,!?:;--…।॥')
+        prev_w_clean = prev_w.lower().rstrip('.,!?:;--…।॥')
         if prev_w.endswith((',', ';', '.', '!', '?', '--', '…', ':', '।', '॥')):
-            pen -= 35
+            pen -= 80  # Dominant preference for natural sentence/clause punctuation!
         elif next_w in ['and', 'but', 'or', 'so', 'that', 'who', 'which', 'because', 'when', 'if',
                         'और', 'या', 'अथवा', 'लेकिन', 'मगर', 'किंतु', 'परंतु', 'क्योंकि', 'इसलिए', 'ताकि', 'कि', 'तो', 'जब', 'तब', 'अगर', 'यदि',
                         'aur', 'ya', 'lekin', 'kyunki', 'isliye', 'taaki', 'agar']:
-            pen -= 25
+            pen -= 45
         elif next_w in {'ने', 'को', 'से', 'का', 'के', 'की', 'में', 'पर', 'पे', 'तक', 'लिए', 'साथ',
                         'ne', 'ko', 'se', 'ka', 'ke', 'ki', 'mein', 'me', 'par', 'pe', 'tak'}:
-            pen += 1500  # Strictly avoid severing noun and postposition across events!
+            pen += 2500  # Strictly avoid severing noun and postposition across events!
+
+        bad_ends = {'a', 'an', 'the', 'mr.', 'mrs.', 'ms.', 'dr.', 'prof.', 'श्री', 'श्रीमती', 'डॉ.', 'wrong'}
+        if prev_w_clean in bad_ends or prev_w.lower() in bad_ends:
+            pen += 2500
+
         if pen < best_pen:
             best_pen = pen
             best_split = i
@@ -623,7 +693,7 @@ def split_and_balance_event(ev: Dict[str, Any], cpl_limit: int = 42, max_lines: 
 
 
 def merge_short_fragments(events: List[Dict[str, Any]], cpl_limit: int = 42, max_lines: int = 2) -> List[Dict[str, Any]]:
-    """Merge tiny fragments (<= 3 words or duration < 1.0s) into the preceding event if they fit grammatically."""
+    """Merge tiny fragments (<= 3 words or duration < 1.0s) into the preceding event only if same speaker and grammatically sound."""
     merged = []
     for ev in events:
         text = ev.get("text", "").strip()
@@ -639,14 +709,20 @@ def merge_short_fragments(events: List[Dict[str, Any]], cpl_limit: int = 42, max
             combined_dur = et - prev_st
 
             # Do NOT merge across different speakers!
-            prev_speakers = prev.get("speakers") or ["Speaker 1"]
-            ev_speakers = ev.get("speakers") or ["Speaker 1"]
-            if prev_speakers != ev_speakers or "-" in prev.get("text", "") or "-" in text:
+            prev_spk = prev.get("speaker") or (prev.get("speakers")[0] if prev.get("speakers") else "Speaker 1")
+            ev_spk = ev.get("speaker") or (ev.get("speakers")[0] if ev.get("speakers") else "Speaker 1")
+            if prev_spk != ev_spk or "-" in prev.get("text", "") or "-" in text:
                 merged.append(ev)
                 continue
 
-            # Do NOT merge if prev ends with question/exclamation and ev starts with conversational reply
-            if prev["text"].rstrip().endswith(("?", "!")) and any(text.lower().startswith(w) for w in ["yes", "yeah", "no", "hi", "hello", "right", "okay", "fine"]):
+            # Do NOT merge if prev ends with terminal punctuation (. ? ! । ॥) and ev is a conversational reply
+            prev_strip = prev.get("text", "").rstrip()
+            conversational_starters = [
+                "yes", "yeah", "yep", "no", "nah", "nope", "hi", "hello", "right", "okay", "ok", "fine", "sure",
+                "हाँ", "नहीं", "ना", "अच्छा", "ठीक", "अरे", "नमस्ते", "शुक्रिया", "धन्यवाद",
+                "haan", "nahi", "nahin", "achha", "theek", "are", "namaste", "dhanyawad"
+            ]
+            if prev_strip.endswith((".", "?", "!", "।", "॥")) and any(text.lower().startswith(w) for w in conversational_starters):
                 merged.append(ev)
                 continue
 
@@ -673,7 +749,8 @@ def polish_subtitle_events_netflix(
     min_duration: float = 0.833,
     max_duration: float = 7.0,
     frame_rate: float = 24.0,
-    shot_changes: Optional[List[float]] = None
+    shot_changes: Optional[List[float]] = None,
+    prev_batch_end: float = 0.0
 ) -> List[Dict[str, Any]]:
     """
     Industry-Standard Netflix conformance pass:
@@ -700,6 +777,16 @@ def polish_subtitle_events_netflix(
         
     # Step 2: Merge orphan tiny fragments that fit into previous event
     expanded_events = merge_short_fragments(expanded_events, cpl_limit=cpl_limit, max_lines=max_lines)
+
+    # Guarantee first event does not collide with previous batch end
+    if expanded_events and prev_batch_end > 0.0:
+        first_ev = expanded_events[0]
+        f_st = float(first_ev.get("start_time", 0.0))
+        if f_st < prev_batch_end + min_gap_sec:
+            first_ev["start_time"] = round(prev_batch_end + min_gap_sec, 3)
+            first_ev["start"] = first_ev["start_time"]
+            first_ev["end_time"] = round(max(float(first_ev.get("end_time", 0.0)), first_ev["start_time"] + min_duration), 3)
+            first_ev["end"] = first_ev["end_time"]
     
     n = len(expanded_events)
     for idx, ev in enumerate(expanded_events):
@@ -738,7 +825,7 @@ def polish_subtitle_events_netflix(
         # 4. CPS expansion into preceding silence gap
         cur_cps = calculate_cps(text, dur)
         if cur_cps > max_cps:
-            prev_et = float(expanded_events[idx - 1]["end_time"]) if idx > 0 else 0.0
+            prev_et = float(expanded_events[idx - 1]["end_time"]) if idx > 0 else prev_batch_end
             pre_gap = st - prev_et
             if pre_gap > min_gap_sec + 0.100:
                 needed_extra = (len(text.replace('\n', ' ')) / max_cps) - dur
@@ -781,8 +868,8 @@ def polish_subtitle_events_netflix(
         if gap < min_gap_sec:
             cur_et = round(nxt_st - min_gap_sec, 3)
             if cur_et - cur_st < min_duration:
-                prev_et = float(expanded_events[i - 1]["end_time"]) if i > 0 else 0.0
-                earliest_st = prev_et + min_gap_sec if i > 0 else 0.0
+                prev_et = float(expanded_events[i - 1]["end_time"]) if i > 0 else prev_batch_end
+                earliest_st = prev_et + min_gap_sec if (i > 0 or prev_batch_end > 0.0) else 0.0
                 cur_st = max(earliest_st, round(cur_et - min_duration, 3))
                 cur["start_time"] = cur_st
                 cur["start"] = cur_st
@@ -803,8 +890,8 @@ def polish_subtitle_events_netflix(
             if avail_post >= needed:
                 cur_et = round(cur_et + needed, 3)
             else:
-                prev_et = float(expanded_events[i - 1]["end_time"]) if i > 0 else 0.0
-                earliest_st = prev_et + min_gap_sec if i > 0 else 0.0
+                prev_et = float(expanded_events[i - 1]["end_time"]) if i > 0 else prev_batch_end
+                earliest_st = prev_et + min_gap_sec if (i > 0 or prev_batch_end > 0.0) else 0.0
                 cur_st = max(earliest_st, round(cur_et - min_duration, 3))
                 cur_et = round(cur_st + min_duration, 3)
             cur["start_time"] = cur_st
@@ -820,8 +907,8 @@ def polish_subtitle_events_netflix(
         if cur_et > nxt_st - min_gap_sec:
             expanded_events[i]["end_time"] = round(nxt_st - min_gap_sec, 3)
             if expanded_events[i]["end_time"] - expanded_events[i]["start_time"] < min_duration:
-                prev_e = expanded_events[i - 1]["end_time"] if i > 0 else 0.0
-                expanded_events[i]["start_time"] = max(prev_e + min_gap_sec if i > 0 else 0.0, round(expanded_events[i]["end_time"] - min_duration, 3))
+                prev_e = expanded_events[i - 1]["end_time"] if i > 0 else prev_batch_end
+                expanded_events[i]["start_time"] = max(prev_e + min_gap_sec if (i > 0 or prev_batch_end > 0.0) else 0.0, round(expanded_events[i]["end_time"] - min_duration, 3))
 
     for ev in expanded_events:
         st = float(ev["start_time"])
@@ -1102,11 +1189,11 @@ def generate_subtitles(
         
     client = get_gemini_client()
     candidate_models = [
-        "gemini-3.5-flash-lite",
-        "gemini-3.5-flash",
-        "gemini-flash-lite-latest",
+        "gemini-3.6-flash",
         "gemini-flash-latest",
-        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-flash-lite-latest",
     ]
     primary = GEMINI_MODEL
     if primary and primary in candidate_models:
@@ -1227,24 +1314,17 @@ def generate_subtitles(
             if isinstance(parsed, list):
                 subs = parsed
                 
-            for s in subs:
-                st_val = s.get("start_time", 0.0)
-                et_val = s.get("end_time", 2.0)
-                s_sec = resolve_chunk_timestamp(st_val, chunk_s, chunk_e)
-                e_sec = resolve_chunk_timestamp(et_val, chunk_s, chunk_e)
-                if e_sec <= s_sec:
-                    e_sec = round(s_sec + 1.5, 3)
-                raw_subtitles.append({
-                    "id": len(raw_subtitles) + 1,
-                    "start_time": s_sec,
-                    "end_time": e_sec,
-                    "start": s_sec,
-                    "end": e_sec,
-                    "text": s.get("text", "").strip(),
-                    "speakers": s.get("speakers", ["Speaker 1"]),
-                    "is_italic": bool(s.get("is_italic", False)),
-                    "is_forced_narrative": bool(s.get("is_forced_narrative", False))
-                })
+            prev_chunk_end = raw_subtitles[-1]["end_time"] if raw_subtitles else 0.0
+            resolved_chunk_subs = resolve_batch_timestamps(
+                subs,
+                chunk_s,
+                chunk_e,
+                prev_batch_end=prev_chunk_end,
+                min_gap_sec=round(2.0 / frame_rate, 3)
+            )
+            for item in resolved_chunk_subs:
+                item["id"] = len(raw_subtitles) + 1
+                raw_subtitles.append(item)
             
             # Update rolling context for next chunk
             for item in raw_subtitles[-5:]:
@@ -1397,11 +1477,11 @@ async def generate_subtitles_stream(
     
     client = get_gemini_client()
     candidate_models = [
-        "gemini-3.5-flash-lite",
-        "gemini-3.5-flash",
-        "gemini-flash-lite-latest",
+        "gemini-3.6-flash",
         "gemini-flash-latest",
-        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-flash-lite-latest",
     ]
     primary = GEMINI_MODEL
     if primary and primary in candidate_models:
@@ -1559,26 +1639,14 @@ async def generate_subtitles_stream(
             if isinstance(parsed, list):
                 subs = parsed
                 
-            # 1. Format raw batch events with absolute video timeline
-            batch_raw = []
-            for s in subs:
-                st_val = s.get("start_time", 0.0)
-                et_val = s.get("end_time", 2.0)
-                s_sec = resolve_chunk_timestamp(st_val, chunk_s, chunk_e)
-                e_sec = resolve_chunk_timestamp(et_val, chunk_s, chunk_e)
-                if e_sec <= s_sec:
-                    e_sec = round(s_sec + 1.5, 3)
-                batch_raw.append({
-                    "id": current_event_id,
-                    "start_time": s_sec,
-                    "end_time": e_sec,
-                    "start": s_sec,
-                    "end": e_sec,
-                    "text": s.get("text", "").strip(),
-                    "speakers": s.get("speakers", ["Speaker 1"]),
-                    "is_italic": bool(s.get("is_italic", False)),
-                    "is_forced_narrative": bool(s.get("is_forced_narrative", False))
-                })
+            # 1. Format raw batch events with absolute video timeline (zero jumping, zero gaps)
+            batch_raw = resolve_batch_timestamps(
+                subs,
+                chunk_s,
+                chunk_e,
+                prev_batch_end=prev_batch_end,
+                min_gap_sec=round(2.0 / frame_rate, 3)
+            )
             
             # Stage 0: Guarantee single speaker per event (split any multi-speaker events)
             from app.netflix_linter import split_multi_speaker_subtitles
@@ -1634,7 +1702,7 @@ async def generate_subtitles_stream(
             active_words = chunk_whisper_words if chunk_whisper_words else [w for w in whisper_words if w["start"] >= chunk_s - 0.5 and w["end"] <= chunk_e + 0.5]
             if active_words and split_batch:
                 log_terminal(f"Batch {chunk_idx}: Synchronizing {len(split_batch)} events acoustically with Whisper...")
-                split_batch = align_subtitle_timestamps(split_batch, active_words, search_radius=8.0)
+                split_batch = align_subtitle_timestamps(split_batch, active_words, search_radius=8.0, prev_batch_end=prev_batch_end)
             
             # Stage 4: Non-destructive Netflix polish
             processed_batch = polish_subtitle_events_netflix(
@@ -1645,7 +1713,8 @@ async def generate_subtitles_stream(
                 min_duration=min_duration,
                 max_duration=max_duration,
                 frame_rate=frame_rate,
-                shot_changes=shot_changes
+                shot_changes=shot_changes,
+                prev_batch_end=prev_batch_end
             )
 
             # 5. Monotonic ID assignment & timeline tracking

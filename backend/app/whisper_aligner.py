@@ -317,7 +317,8 @@ def _find_best_word_match(
 def align_subtitle_timestamps(
     gemini_events: List[Dict[str, Any]],
     whisper_words: List[Dict[str, Any]],
-    search_radius: float = 8.0
+    search_radius: float = 8.0,
+    prev_batch_end: float = 0.0
 ) -> List[Dict[str, Any]]:
     """
     Aligns Gemini subtitle timestamps against Whisper acoustic word boundaries.
@@ -332,7 +333,7 @@ def align_subtitle_timestamps(
     total_w = len(whisper_words)
     w_idx = 0
     aligned_count = 0
-    prev_end = 0.0
+    prev_end = prev_batch_end
 
     for ev_idx, event in enumerate(gemini_events):
         text = event.get("text", "")

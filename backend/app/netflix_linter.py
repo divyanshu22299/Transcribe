@@ -358,36 +358,41 @@ def optimize_line_breaks(text: str, max_cpl: int = 42) -> str:
         score = abs(upper_len - target_split) * 0.5
         
         # Bonus for breaking at good points
-        break_word = words[split_pos].lower().rstrip('.,!?;:')
+        break_word = words[split_pos].lower().rstrip('.,!?;:।॥…')
+        last_upper = words[split_pos - 1].lower().rstrip('.,!?;:।॥…')
+
         if break_word in GOOD_BREAK_BEFORE:
-            score -= 10.0
+            score -= 35.0
         
-        # Bonus for breaking after punctuation (English & Hindi)
+        # Dominant bonus for breaking after punctuation (English & Hindi)
         if upper.rstrip()[-1:] in {',', '.', ';', ':', '!', '?', '—', '–', '।', '॥', '…'}:
-            score -= 15.0
+            score -= 60.0
         
         # Heavy penalty for bad breaks
-        last_upper = words[split_pos - 1].lower().rstrip('.,!?;:')
         if last_upper in {'a', 'an', 'the'}:  # article + noun split
-            score += 50.0
+            score += 200.0
         if last_upper in {'i', 'he', 'she', 'it', 'we', 'you', 'they'}:  # pronoun + verb split
-            score += 50.0
+            score += 200.0
         if last_upper in {'mr', 'mrs', 'ms', 'dr', 'prof', 'mr.', 'mrs.', 'ms.', 'dr.', 'prof.', *HINDI_TITLES}:
-            score += 50.0
-        if break_word in HINDI_POSTPOSITIONS:  # Postposition stranded on lower line
-            score += 75.0
+            score += 300.0
+        if last_upper in HINDI_POSTPOSITIONS:  # Postposition stranded at end of line 1!
+            score += 350.0
+        if break_word in HINDI_POSTPOSITIONS:  # Postposition stranded on line 2!
+            score += 400.0
+        if break_word in {"है", "हैं", "था", "थी", "थे", "रहा", "रही", "रहे", "सकता", "सकती", "सकते", "hai", "hain", "tha", "thi", "the", "raha", "rahi", "rahe"}:
+            score += 250.0
         if words[split_pos - 1].replace(',', '').replace('.', '').isdigit():
             unit_words = {'miles', 'km', 'meters', 'feet', 'dollars', 'euros', 'percent',
                          'hours', 'minutes', 'seconds', 'mph', 'kph'}
             if break_word in unit_words:
-                score += 50.0
+                score += 150.0
         
         # Penalty for orphan on lower line
         if len(lower.strip()) <= ORPHAN_MAX_CHARS:
-            score += 30.0
+            score += 100.0
         
         # Penalty for distance from ideal split point
-        score += abs(upper_len - target_split) * 0.5
+        score += abs(upper_len - target_split) * 0.3
         
         if score < best_score:
             best_score = score
@@ -1296,9 +1301,29 @@ def split_multi_speaker_subtitles(
 
         lines = [l.strip() for l in text.split("\n") if l.strip()]
 
+        # Check for inline dual-speaker separation on a single line
+        if len(lines) == 1:
+            single = lines[0]
+            # 1. Inline hyphens: e.g. "- Hello! - Hi!" or "Hello! - Hi!"
+            inline_hyphen_parts = [p.strip() for p in re.split(r'(?:^|\s+)[-—–]\s+', single) if p.strip()]
+            if len(inline_hyphen_parts) >= 2:
+                lines = [f"- {p}" for p in inline_hyphen_parts]
+            elif len(speakers) > 1:
+                # 2. Model returned multiple speakers but single line of text without hyphens
+                # Split at sentence boundaries (., !, ?, ।, ॥)
+                sent_parts = [p.strip() for p in re.split(r'(?<=[.!?।॥])\s+', single) if p.strip()]
+                if len(sent_parts) >= 2:
+                    lines = sent_parts
+                else:
+                    # Split words equally among speakers
+                    w = single.split()
+                    if len(w) >= 2:
+                        mid = len(w) // 2
+                        lines = [' '.join(w[:mid]), ' '.join(w[mid:])]
+
         # Condition A: 2 or more lines starting with hyphen / dash (e.g. '- Speaker 1\n- Speaker 2')
         hyphen_lines = [l for l in lines if l.startswith(("-", "—", "–"))]
-        is_dual_hyphen = (len(hyphen_lines) >= 2 and len(hyphen_lines) == len(lines))
+        is_dual_hyphen = (len(hyphen_lines) >= 2)
 
         # Condition B: Multiple speaker names present in speakers list (len > 1)
         has_multiple_speakers = len(speakers) > 1
@@ -1318,9 +1343,9 @@ def split_multi_speaker_subtitles(
             and speaker_prefixed_lines[0][0] != speaker_prefixed_lines[1][0]
         )
 
-        should_split = is_dual_hyphen or has_multiple_speakers or has_different_prefix_speakers
+        should_split = (is_dual_hyphen or has_multiple_speakers or has_different_prefix_speakers) and len(lines) >= 2
 
-        if not should_split or len(lines) < 2:
+        if not should_split:
             # Single speaker event! Just ensure speaker array has exactly 1 speaker
             clean_ev = dict(ev)
             clean_ev["speakers"] = [speakers[0]] if speakers else ["Speaker 1"]

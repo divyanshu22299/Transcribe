@@ -474,9 +474,9 @@ def find_dialogue_split_points(
             # Dynamic local noise floor and speech energy threshold
             p10 = float(np.percentile(candidate_energies, 15))
             p90 = float(np.percentile(candidate_energies, 85))
-            silence_threshold = p10 + 0.12 * max(1e-5, p90 - p10)
+            silence_threshold = p10 + 0.16 * max(1e-5, p90 - p10)
 
-            # Find consecutive silent frames (runs >= 300ms)
+            # Find consecutive silent frames (runs >= 350ms)
             silent_mask = candidate_energies <= silence_threshold
             best_score = float('inf')
             run_start = None
@@ -489,10 +489,10 @@ def find_dialogue_split_points(
                     if run_start is not None:
                         run_len = idx - run_start
                         run_dur = run_len * 0.01  # 10ms hop
-                        if run_dur >= 0.25:  # At least 250ms silence pause
+                        if run_dur >= 0.35:  # At least 350ms natural speech pause
                             run_mid_time = candidate_times[(run_start + idx) // 2]
-                            dist_penalty = abs(run_mid_time - (cur_start + target_chunk_sec))
-                            sil_bonus = min(run_dur, 2.0) * 20.0
+                            dist_penalty = abs(run_mid_time - (cur_start + target_chunk_sec)) * 0.3
+                            sil_bonus = min(run_dur, 3.0) * 45.0
                             score = dist_penalty - sil_bonus
 
                             if score < best_score:
@@ -504,18 +504,18 @@ def find_dialogue_split_points(
             if run_start is not None:
                 run_len = len(silent_mask) - run_start
                 run_dur = run_len * 0.01
-                if run_dur >= 0.25:
+                if run_dur >= 0.35:
                     run_mid_time = candidate_times[(run_start + len(silent_mask)) // 2]
-                    dist_penalty = abs(run_mid_time - (cur_start + target_chunk_sec))
-                    sil_bonus = min(run_dur, 2.0) * 20.0
+                    dist_penalty = abs(run_mid_time - (cur_start + target_chunk_sec)) * 0.3
+                    sil_bonus = min(run_dur, 3.0) * 45.0
                     score = dist_penalty - sil_bonus
                     if score < best_score:
                         best_score = score
                         best_split_point = run_mid_time
 
-            # If no sustained pause was found below threshold, find the deepest acoustic valley (300ms rolling average)
+            # If no sustained pause was found below threshold, find the deepest acoustic valley (500ms rolling average)
             if best_score == float('inf'):
-                roll_window = 30  # 300ms window
+                roll_window = 50  # 500ms window
                 if len(candidate_energies) > roll_window:
                     kernel = np.ones(roll_window) / roll_window
                     smooth = np.convolve(candidate_energies, kernel, mode='valid')
