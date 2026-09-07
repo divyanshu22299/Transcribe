@@ -66,6 +66,7 @@ export default function SubtitleApp({ onBackToHome }) {
   const [currentVideoId, setCurrentVideoId] = useState(null);
   const [initialWaveformPeaks, setInitialWaveformPeaks] = useState([]);
   const [audioExtractionStatus, setAudioExtractionStatus] = useState(null); // { stage, percent, detail }
+  const extractedAudioFileRef = useRef(null); // Cache client-extracted audio file to avoid re-extracting
 
   const isAudioFile = useMemo(() => {
     if (!selectedFile) return false;
@@ -79,22 +80,28 @@ export default function SubtitleApp({ onBackToHome }) {
   const processAndUploadMedia = useCallback(async (fileToProcess, isAudio) => {
     let uploadTarget = fileToProcess;
 
-    // 1. If video file, extract lightweight mono audio track in browser first!
+    // 1. If video file, extract lightweight mono audio track in browser first (or reuse cached)
     if (!isAudio) {
-      try {
-        setAudioExtractionStatus({ stage: 'extracting', percent: 20, detail: 'Extracting audio in browser...' });
-        const extracted = await extractAudioFromMedia(fileToProcess, (p) => {
-          setAudioExtractionStatus({ stage: 'extracting', ...p });
-        });
-        if (extracted.peaks && extracted.peaks.length > 0) {
-          setInitialWaveformPeaks(extracted.peaks);
+      if (extractedAudioFileRef.current) {
+        uploadTarget = extractedAudioFileRef.current;
+      } else {
+        try {
+          setAudioExtractionStatus({ stage: 'extracting', percent: 20, detail: 'Extracting audio in browser...' });
+          const extracted = await extractAudioFromMedia(fileToProcess, (p) => {
+            setAudioExtractionStatus({ stage: 'extracting', ...p });
+          });
+          if (extracted.peaks && extracted.peaks.length > 0) {
+            setInitialWaveformPeaks(extracted.peaks);
+          }
+          uploadTarget = extracted.audioFile;
+          extractedAudioFileRef.current = extracted.audioFile;
+        } catch (extErr) {
+          console.warn("Client audio extraction fallback:", extErr);
+          uploadTarget = fileToProcess;
         }
-        uploadTarget = extracted.audioFile;
-      } catch (extErr) {
-        console.warn("Client audio extraction fallback:", extErr);
-        uploadTarget = fileToProcess;
       }
     } else {
+      extractedAudioFileRef.current = fileToProcess;
       // For audio files, extract peaks locally for instant waveform rendering
       try {
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -110,9 +117,9 @@ export default function SubtitleApp({ onBackToHome }) {
       } catch (_) {}
     }
 
-    // 2. Upload to backend (chunked if > 90MB, direct otherwise)
+    // 2. Upload to backend (chunked if > 20MB, direct otherwise)
     try {
-      if (uploadTarget.size > 90 * 1024 * 1024) {
+      if (uploadTarget.size > 20 * 1024 * 1024) {
         setAudioExtractionStatus({ stage: 'uploading', percent: 10, detail: 'Uploading via chunked slices...' });
         const chunkData = await uploadFileInChunks(uploadTarget, API_BASE, (p) => {
           setAudioExtractionStatus({ stage: 'uploading', ...p });
@@ -657,6 +664,7 @@ export default function SubtitleApp({ onBackToHome }) {
     if (file) {
       setSelectedFile(file);
       setCurrentVideoId(null);
+      extractedAudioFileRef.current = null;
       setInitialWaveformPeaks([]);
       const url = URL.createObjectURL(file);
       setVideoUrl(url);
@@ -946,7 +954,7 @@ export default function SubtitleApp({ onBackToHome }) {
       setProgressDetail('Connecting to Gemini AI pipeline...');
 
       console.log(`[Subtitle Studio] Starting batch stream for Video ID: ${videoId}`);
-      const streamRes = await fetch(`${API_BASE}/api/subtitle/generate_stream`, {
+      let streamRes = await fetch(`${API_BASE}/api/subtitle/generate_stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -964,8 +972,48 @@ export default function SubtitleApp({ onBackToHome }) {
         })
       });
 
+      // Self-Healing Session Expiration:
+      // If server restarted or disk session expired (404), re-upload media and retry stream automatically!
+      if (streamRes.status === 404) {
+        console.warn(`[Subtitle Studio] Session for ${videoId} expired on server (404). Automatically re-uploading media...`);
+        setCurrentVideoId(null);
+        setProgressPercent(14);
+        setProgressStage('Re-synchronizing Media to Server');
+        setProgressDetail('Cloud server session expired or restarted. Re-uploading audio track...');
+        
+        videoId = await processAndUploadMedia(selectedFile, isAudioFile);
+        if (!videoId) {
+          throw new Error('Media re-upload failed after server session expired.');
+        }
+        setCurrentVideoId(videoId);
+
+        setProgressPercent(22);
+        setProgressStage('Starting AI Subtitle Stream');
+        setProgressDetail('Connecting to Gemini AI pipeline with active session...');
+        console.log(`[Subtitle Studio] Retrying batch stream for new Video ID: ${videoId}`);
+
+        streamRes = await fetch(`${API_BASE}/api/subtitle/generate_stream`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            video_id: videoId,
+            language,
+            script,
+            content_type: contentType,
+            sdh_mode: sdhMode,
+            cpl_limit: cplLimit,
+            max_cps: cpsLimit,
+            max_lines: maxLines,
+            min_duration: minDuration,
+            max_duration: maxDuration,
+            gemini_auto_fix: geminiAutoFix
+          })
+        });
+      }
+
       if (!streamRes.ok) {
-        throw new Error(`Stream request failed (Status: ${streamRes.status})`);
+        const errDetail = await streamRes.json().catch(() => null);
+        throw new Error(errDetail?.detail || `Stream request failed (Status: ${streamRes.status})`);
       }
 
       const reader = streamRes.body.getReader();
@@ -1685,7 +1733,7 @@ export default function SubtitleApp({ onBackToHome }) {
           <AudioWaveformTimeline 
             videoUrl={videoUrl}
             selectedFile={selectedFile}
-            videoId={currentVideoId || (selectedFile?.name ? selectedFile.name.replace(/\.[^/.]+$/, '') : null)}
+            videoId={currentVideoId || null}
             initialPeaks={initialWaveformPeaks}
             API_BASE={API_BASE}
             isAudio={isAudioFile}

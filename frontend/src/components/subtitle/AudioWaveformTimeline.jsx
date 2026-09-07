@@ -235,7 +235,7 @@ export default function AudioWaveformTimeline({
       }
 
       // Priority 1: Backend Acoustic Peaks Endpoint (Only if video has an assigned videoId from backend)
-      if (videoId) {
+      if (videoId && (videoId.includes('_') || videoId.startsWith('up_') || videoId.length >= 10)) {
         try {
           const cached = sessionStorage.getItem(`karya_peaks_${videoId}`);
           if (cached) {
@@ -264,8 +264,8 @@ export default function AudioWaveformTimeline({
               return;
             }
           }
-        } catch (err) {
-          console.warn("Backend waveform endpoint check:", err);
+        } catch (_) {
+          // Graceful fallback to client audio decoding
         }
       }
 

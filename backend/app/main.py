@@ -1103,7 +1103,7 @@ async def upload_video_chunk(
     final_file_path = UPLOAD_DIR / safe_filename
     if final_file_path.exists():
         final_file_path.unlink()
-    part_path.rename(final_file_path)
+    shutil.move(str(part_path), str(final_file_path))
 
     return await _process_saved_media(final_file_path, safe_filename, clean_stem, raw_stem, ext)
 
