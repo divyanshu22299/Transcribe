@@ -234,11 +234,10 @@ export default function AudioWaveformTimeline({
         return;
       }
 
-      const targetId = videoId || (selectedFile?.name ? selectedFile.name.replace(/\.[^/.]+$/, '') : null);
-
-      if (targetId) {
+      // Priority 1: Backend Acoustic Peaks Endpoint (Only if video has an assigned videoId from backend)
+      if (videoId) {
         try {
-          const cached = sessionStorage.getItem(`karya_peaks_${targetId}`);
+          const cached = sessionStorage.getItem(`karya_peaks_${videoId}`);
           if (cached) {
             const parsed = JSON.parse(cached);
             if (parsed && parsed.length > 0) {
@@ -248,19 +247,11 @@ export default function AudioWaveformTimeline({
             }
           }
         } catch (_) {}
-      }
 
-      // Priority 1: Backend Acoustic Peaks Endpoint (Instant 20ms cache response)
-      if (targetId) {
         try {
           setIsAudioLoading(true);
           const base = API_BASE || '';
-          let res = await fetch(`${base}/api/subtitle/waveform/${encodeURIComponent(targetId)}`);
-          if (!res.ok && res.status === 404) {
-            await new Promise(r => setTimeout(r, 600));
-            if (isCancelled) return;
-            res = await fetch(`${base}/api/subtitle/waveform/${encodeURIComponent(targetId)}`);
-          }
+          const res = await fetch(`${base}/api/subtitle/waveform/${encodeURIComponent(videoId)}`);
           if (res.ok) {
             const data = await res.json();
             if (!isCancelled && data.peaks && data.peaks.length > 0) {
@@ -268,10 +259,7 @@ export default function AudioWaveformTimeline({
               setWaveformPointsPerSec(data.points_per_sec || 50);
               setIsAudioLoading(false);
               try {
-                sessionStorage.setItem(`karya_peaks_${targetId}`, JSON.stringify(data.peaks));
-                if (videoId && videoId !== targetId) {
-                  sessionStorage.setItem(`karya_peaks_${videoId}`, JSON.stringify(data.peaks));
-                }
+                sessionStorage.setItem(`karya_peaks_${videoId}`, JSON.stringify(data.peaks));
               } catch (_) {}
               return;
             }

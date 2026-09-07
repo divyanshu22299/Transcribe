@@ -110,6 +110,7 @@ export default function SubtitleApp({ onBackToHome }) {
   const fileInputRef = useRef(null);
   const srtImportRef = useRef(null);
   const headerMenuRef = useRef(null);
+  const uploadPromiseRef = useRef(null);
 
   // ── Dynamic Subtitle & QC Threshold Settings ──
   const [cplLimit, setCplLimit] = useState(() => {
@@ -567,13 +568,15 @@ export default function SubtitleApp({ onBackToHome }) {
               if (data.peaks && data.peaks.length > 0) {
                 setInitialWaveformPeaks(data.peaks);
               }
+              return data.video_id;
             }
           }
         } catch (err) {
           console.warn("Background upload for waveform:", err);
         }
+        return null;
       };
-      bgUpload(file);
+      uploadPromiseRef.current = bgUpload(file);
 
       // Reset subtitle canvas for clean state
       setEvents([]);
@@ -819,6 +822,16 @@ export default function SubtitleApp({ onBackToHome }) {
 
     try {
       let videoId = currentVideoId;
+      if (!videoId && uploadPromiseRef.current) {
+        setProgressPercent(10);
+        setProgressStage('Finalizing Media Transfer');
+        setProgressDetail('Waiting for background media upload to finish...');
+        videoId = await uploadPromiseRef.current;
+        if (videoId) {
+          setCurrentVideoId(videoId);
+        }
+      }
+
       if (!videoId) {
         const formData = new FormData();
         formData.append('file', selectedFile);
