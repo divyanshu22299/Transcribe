@@ -127,7 +127,8 @@ class SubtitleGenerationRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="allow")
     
     video_id: str
-    language: Optional[str] = "en"
+    language: Optional[str] = "auto"
+    script: Optional[str] = "auto"
     content_type: Optional[str] = "adult"
     sdh_mode: Optional[bool] = False
 

@@ -400,14 +400,14 @@ def snap_to_acoustic_boundaries(
 
 def find_dialogue_split_points(
     audio_path: str,
-    target_chunk_sec: float = 60.0,    # ~1 minute chunks for zero AI timestamp drift
-    min_chunk_sec: float = 40.0,       # at least 40s
-    max_chunk_sec: float = 85.0        # at most 1m 25s
+    target_chunk_sec: float = 150.0,   # ~2.5 minute chunks for rich conversational context
+    min_chunk_sec: float = 90.0,       # at least 1.5m
+    max_chunk_sec: float = 210.0       # at most 3.5m (plenty of room to find natural pauses)
 ) -> List[Tuple[float, float]]:
     """
-    Partitions a long audio file into 1-minute subtask chunks.
-    CRITICAL: Splits ONLY at natural dialogue pauses / sentence completion silences
-    so that words/sentences are NEVER cut in the middle.
+    Partitions a long audio file into natural conversational chunks.
+    CRITICAL: Splits ONLY at genuine dialogue silences / sentence completion pauses
+    so that words or sentences are NEVER cut in the middle.
     Returns list of (start_sec, end_sec) chunks covering the whole file without gaps.
     """
     try:
@@ -434,7 +434,7 @@ def find_dialogue_split_points(
             cur = nxt
         return chunks
 
-    # Calculate 50ms energy frames with 10ms hop to find clean dialogue silence gaps
+    # Calculate 50ms energy frames with 10ms hop
     frame_len = int(samplerate * 0.05)
     hop_len = int(samplerate * 0.01)
     
@@ -449,20 +449,16 @@ def find_dialogue_split_points(
     energies = np.array(energies)
     times = np.array(times)
 
-    # Estimate noise floor (20th percentile)
-    noise_floor = float(np.percentile(energies, 20))
-    peak_energy = float(np.max(energies))
-    silence_threshold = noise_floor + 0.06 * (peak_energy - noise_floor)
-
     chunks: List[Tuple[float, float]] = []
     cur_start = 0.0
 
     while cur_start < total_sec:
-        if total_sec - cur_start <= max_chunk_sec:
+        remaining = total_sec - cur_start
+        if remaining <= max_chunk_sec:
             chunks.append((round(cur_start, 3), round(total_sec, 3)))
             break
 
-        # Search for clean dialogue pause in window [cur_start + min_chunk_sec, cur_start + max_chunk_sec]
+        # Search window: flexible between min_chunk_sec and max_chunk_sec
         win_s = cur_start + min_chunk_sec
         win_e = min(total_sec, cur_start + max_chunk_sec)
         
@@ -475,7 +471,12 @@ def find_dialogue_split_points(
             candidate_energies = energies[candidate_indices]
             candidate_times = times[candidate_indices]
 
-            # Find consecutive silent frames
+            # Dynamic local noise floor and speech energy threshold
+            p10 = float(np.percentile(candidate_energies, 15))
+            p90 = float(np.percentile(candidate_energies, 85))
+            silence_threshold = p10 + 0.12 * max(1e-5, p90 - p10)
+
+            # Find consecutive silent frames (runs >= 300ms)
             silent_mask = candidate_energies <= silence_threshold
             best_score = float('inf')
             run_start = None
@@ -487,19 +488,42 @@ def find_dialogue_split_points(
                 else:
                     if run_start is not None:
                         run_len = idx - run_start
-                        run_mid_time = candidate_times[(run_start + idx) // 2]
-                        dist_penalty = abs(run_mid_time - (cur_start + target_chunk_sec))
-                        sil_bonus = max(0, run_len * 0.01) * 20.0
-                        score = dist_penalty - sil_bonus
+                        run_dur = run_len * 0.01  # 10ms hop
+                        if run_dur >= 0.25:  # At least 250ms silence pause
+                            run_mid_time = candidate_times[(run_start + idx) // 2]
+                            dist_penalty = abs(run_mid_time - (cur_start + target_chunk_sec))
+                            sil_bonus = min(run_dur, 2.0) * 20.0
+                            score = dist_penalty - sil_bonus
 
-                        if score < best_score:
-                            best_score = score
-                            best_split_point = run_mid_time
+                            if score < best_score:
+                                best_score = score
+                                best_split_point = run_mid_time
                         run_start = None
 
+            # Check trailing run if loop ended while in silence
+            if run_start is not None:
+                run_len = len(silent_mask) - run_start
+                run_dur = run_len * 0.01
+                if run_dur >= 0.25:
+                    run_mid_time = candidate_times[(run_start + len(silent_mask)) // 2]
+                    dist_penalty = abs(run_mid_time - (cur_start + target_chunk_sec))
+                    sil_bonus = min(run_dur, 2.0) * 20.0
+                    score = dist_penalty - sil_bonus
+                    if score < best_score:
+                        best_score = score
+                        best_split_point = run_mid_time
+
+            # If no sustained pause was found below threshold, find the deepest acoustic valley (300ms rolling average)
             if best_score == float('inf'):
-                min_idx = np.argmin(candidate_energies)
-                best_split_point = candidate_times[min_idx]
+                roll_window = 30  # 300ms window
+                if len(candidate_energies) > roll_window:
+                    kernel = np.ones(roll_window) / roll_window
+                    smooth = np.convolve(candidate_energies, kernel, mode='valid')
+                    min_idx = int(np.argmin(smooth)) + (roll_window // 2)
+                    best_split_point = candidate_times[min_idx]
+                else:
+                    min_idx = int(np.argmin(candidate_energies))
+                    best_split_point = candidate_times[min_idx]
 
         best_split_point = round(min(total_sec, max(cur_start + min_chunk_sec, best_split_point)), 3)
         chunks.append((round(cur_start, 3), best_split_point))

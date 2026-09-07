@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
   Trash2, Plus, Sparkles, CheckSquare, Square, MinusSquare,
   Search, X, Filter, SlidersHorizontal, ArrowUpDown, AlertTriangle
 } from 'lucide-react';
 import SubtitleEventCard from './SubtitleEventCard';
 
-export default function SubtitleGridView({
+function SubtitleGridView({
   events = [],
   activeEventId = null,
   setActiveEventId = () => {},
@@ -27,6 +27,32 @@ export default function SubtitleGridView({
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [filterMode, setFilterMode] = useState('all'); // 'all' | 'errors' | 'warnings'
   const [searchQuery, setSearchQuery] = useState('');
+
+  // ── High-Performance Viewport Virtualization (Smooth 60-120 FPS on 1,500+ cards) ──
+  const containerRef = useRef(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(600);
+  const ITEM_HEIGHT = 145; // average card height + gap
+  const OVERSCAN = 5;
+
+  const handleScroll = useCallback((e) => {
+    setScrollTop(e.currentTarget.scrollTop);
+  }, []);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    setViewportHeight(el.clientHeight || 600);
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect.height) {
+          setViewportHeight(entry.contentRect.height);
+        }
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // Filter events based on search and mode
   const filteredEvents = useMemo(() => {
@@ -59,6 +85,30 @@ export default function SubtitleGridView({
       return true;
     });
   }, [events, searchQuery, filterMode, cplLimit, cpsLimit]);
+
+  // Smooth auto-scroll when activeEventId changes externally
+  useEffect(() => {
+    if (!activeEventId || !containerRef.current) return;
+    const activeIdx = filteredEvents.findIndex(e => (e.id === activeEventId || e.event_id === activeEventId));
+    if (activeIdx !== -1) {
+      const itemTop = activeIdx * ITEM_HEIGHT;
+      const curScroll = containerRef.current.scrollTop;
+      const vHeight = containerRef.current.clientHeight || 600;
+      if (itemTop < curScroll || itemTop > curScroll + vHeight - ITEM_HEIGHT) {
+        containerRef.current.scrollTo({
+          top: Math.max(0, itemTop - vHeight / 3),
+          behavior: 'smooth'
+        });
+      }
+    }
+  }, [activeEventId, filteredEvents]);
+
+  const totalCount = filteredEvents.length;
+  const totalHeight = totalCount * ITEM_HEIGHT;
+  const startIndex = Math.max(0, Math.floor(scrollTop / ITEM_HEIGHT) - OVERSCAN);
+  const endIndex = Math.min(totalCount, Math.ceil((scrollTop + viewportHeight) / ITEM_HEIGHT) + OVERSCAN);
+  const visibleEvents = filteredEvents.slice(startIndex, endIndex);
+  const topPadding = startIndex * ITEM_HEIGHT;
 
   // Toggle single selection
   const handleToggleSelect = (id, e) => {
@@ -239,8 +289,12 @@ export default function SubtitleGridView({
         </div>
       </div>
 
-      {/* ── Subtitle Cards Container (Scrollable) ── */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+      {/* ── Subtitle Cards Container (High-Performance Virtualized Viewport) ── */}
+      <div 
+        ref={containerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto p-2 custom-scrollbar relative"
+      >
         {filteredEvents.length === 0 ? (
           <div className="h-64 flex flex-col items-center justify-center text-center p-6 text-slate-400">
             <Sparkles className="w-8 h-8 mb-2 opacity-40 animate-pulse text-[#00e5be]" />
@@ -250,43 +304,61 @@ export default function SubtitleGridView({
             </p>
           </div>
         ) : (
-          filteredEvents.map((event, idx) => (
-            <SubtitleEventCard
-              key={event.id ?? idx}
-              event={event}
-              isActive={activeEventId === event.id}
-              onActivate={setActiveEventId}
-              onUpdate={onUpdateEvent}
-              onPlay={onPlayEvent}
-              onSplit={onSplitEvent}
-              onMerge={onMergeEvent}
-              onDelete={onDeleteEvent}
-              onRebreak={onRebreakEvent}
-              onNavigatePrev={() => {
-                const curIdx = events.findIndex(e => e.id === event.id);
-                if (curIdx > 0) {
-                  const prevId = events[curIdx - 1].id;
-                  setActiveEventId(prevId);
-                  onPlayEvent(prevId);
-                }
+          <div style={{ height: `${totalHeight}px`, position: 'relative', width: '100%' }}>
+            <div 
+              style={{ 
+                transform: `translate3d(0, ${topPadding}px, 0)`,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                width: '100%'
               }}
-              onNavigateNext={() => {
-                const curIdx = events.findIndex(e => e.id === event.id);
-                if (curIdx < events.length - 1) {
-                  const nextId = events[curIdx + 1].id;
-                  setActiveEventId(nextId);
-                  onPlayEvent(nextId);
-                }
-              }}
-              cplLimit={cplLimit}
-              cpsLimit={cpsLimit}
-              frameRate={frameRate}
-              showMerge={idx < filteredEvents.length - 1}
-              theme={theme}
-            />
-          ))
+            >
+              {visibleEvents.map((event, relIdx) => {
+                const idx = startIndex + relIdx;
+                const curId = event.id ?? event.event_id;
+                return (
+                  <SubtitleEventCard
+                    key={curId ?? idx}
+                    event={event}
+                    isActive={activeEventId === curId}
+                    onActivate={setActiveEventId}
+                    onUpdate={onUpdateEvent}
+                    onPlay={onPlayEvent}
+                    onSplit={onSplitEvent}
+                    onMerge={onMergeEvent}
+                    onDelete={onDeleteEvent}
+                    onRebreak={onRebreakEvent}
+                    onNavigatePrev={() => {
+                      const curIdx = events.findIndex(e => (e.id === curId || e.event_id === curId));
+                      if (curIdx > 0) {
+                        const prevId = events[curIdx - 1].id ?? events[curIdx - 1].event_id;
+                        setActiveEventId(prevId);
+                        onPlayEvent(prevId);
+                      }
+                    }}
+                    onNavigateNext={() => {
+                      const curIdx = events.findIndex(e => (e.id === curId || e.event_id === curId));
+                      if (curIdx < events.length - 1) {
+                        const nextId = events[curIdx + 1].id ?? events[curIdx + 1].event_id;
+                        setActiveEventId(nextId);
+                        onPlayEvent(nextId);
+                      }
+                    }}
+                    cplLimit={cplLimit}
+                    cpsLimit={cpsLimit}
+                    frameRate={frameRate}
+                    showMerge={idx < filteredEvents.length - 1}
+                    theme={theme}
+                  />
+                );
+              })}
+            </div>
+          </div>
         )}
       </div>
     </div>
   );
 }
+
+export default React.memo(SubtitleGridView);

@@ -4,7 +4,7 @@ import {
   FileDown, Sliders, ShieldCheck, Film, Undo2, Redo2, 
   SlidersHorizontal, Search, Split, Merge, Scissors, Trash2, Plus, 
   ChevronDown, X, Play, Clock, Activity, FileText, Check, Settings, 
-  Menu, Download, Eye, AlertTriangle, Layers, Type, Sun, Moon, Loader2
+  Menu, Download, Eye, AlertTriangle, Layers, Type, Sun, Moon, Loader2, Globe
 } from 'lucide-react';
 import { API_BASE } from '../../config';
 import VideoPlayer from './VideoPlayer';
@@ -25,6 +25,7 @@ export default function SubtitleApp({ onBackToHome }) {
   const [videoUrl, setVideoUrl] = useState(null);
   const [videoDuration, setVideoDuration] = useState(0);
   const [currentVideoId, setCurrentVideoId] = useState(null);
+  const [initialWaveformPeaks, setInitialWaveformPeaks] = useState([]);
 
   const isAudioFile = useMemo(() => {
     if (!selectedFile) return false;
@@ -38,13 +39,20 @@ export default function SubtitleApp({ onBackToHome }) {
   const [events, setEvents] = useState([]);
   const [originalEvents, setOriginalEvents] = useState([]);
   const [activeEventId, setActiveEventId] = useState(null);
+  const editedEventIdsRef = useRef(new Set()); // Protected manual user edits across progressive batches
+  const [qcNotification, setQcNotification] = useState(null); // { message, chunkIndex, totalChunks, timestamp }
 
   // Video playback sync state
   const [currentTime, setCurrentTime] = useState(0);
   const [playTarget, setPlayTarget] = useState(null);
 
   // Netflix Rules & QC Telemetry
-  const [language, setLanguage] = useState('en');
+  const [language, setLanguage] = useState(() => {
+    try { return localStorage.getItem('karya_sub_language') || 'hi'; } catch(_) { return 'hi'; }
+  });
+  const [script, setScript] = useState(() => {
+    try { return localStorage.getItem('karya_sub_script') || 'devanagari'; } catch(_) { return 'devanagari'; }
+  });
   const [contentType, setContentType] = useState('adult'); // 'adult' (20 CPS) | 'children' (17 CPS)
   const [sdhMode, setSdhMode] = useState(false);
   const [frameRate, setFrameRate] = useState(24.0);
@@ -281,6 +289,64 @@ export default function SubtitleApp({ onBackToHome }) {
     setHistoryIndex(prev => prev + 1);
   }, [historyIndex]);
 
+  // Linting with non-destructive error map updating (never overwrites user typing)
+  const handleLint = useCallback(async (updatedEvents) => {
+    if (!updatedEvents || updatedEvents.length === 0) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/subtitle/lint`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          events: updatedEvents,
+          shot_changes: shotChanges,
+          frame_rate: frameRate,
+          content_type: contentType,
+          custom_cpl: cplLimit,
+          custom_cps: cpsLimit,
+          custom_max_lines: maxLines,
+          custom_min_duration: minDuration,
+          custom_max_duration: maxDuration
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setComplianceScore(data.compliance_score || 100);
+        setTotalErrors(data.total_errors || 0);
+        setTotalWarnings(data.total_warnings || 0);
+        setCpsStats(data.cps_stats || null);
+        if (data.events) {
+          const sanitized = sanitizeEvents(data.events);
+          const errMap = new Map(sanitized.map(e => [e.id ?? e.event_id, (e.qc_errors || e.errors || [])]));
+          setEvents(prev => prev.map(e => {
+            const curId = e.id ?? e.event_id;
+            const newErrors = errMap.get(curId);
+            return newErrors ? { ...e, qc_errors: newErrors, errors: newErrors } : e;
+          }));
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }, [shotChanges, frameRate, contentType, cplLimit, cpsLimit, maxLines, minDuration, maxDuration, sanitizeEvents]);
+
+  const lintDebounceRef = useRef(null);
+  const debouncedLint = useCallback((updatedEvents) => {
+    if (lintDebounceRef.current) clearTimeout(lintDebounceRef.current);
+    lintDebounceRef.current = setTimeout(() => {
+      handleLint(updatedEvents);
+      lintDebounceRef.current = null;
+    }, 750);
+  }, [handleLint]);
+
+  const historyDebounceRef = useRef(null);
+  const debouncedPushHistory = useCallback((nextEvents) => {
+    if (historyDebounceRef.current) clearTimeout(historyDebounceRef.current);
+    historyDebounceRef.current = setTimeout(() => {
+      pushToHistory(nextEvents);
+      historyDebounceRef.current = null;
+    }, 800);
+  }, [pushToHistory]);
+
   const handleUndo = () => {
     if (historyIndex > 0) {
       const targetIdx = historyIndex - 1;
@@ -332,6 +398,9 @@ export default function SubtitleApp({ onBackToHome }) {
       const newEv1 = { ...ev, end_time: timeToSplit, end: timeToSplit, text: text1 };
       const newEv2 = { ...ev, id: Math.max(...prev.map(p => p.id || 0)) + 1, start_time: timeToSplit + 0.08, start: timeToSplit + 0.08, text: text2 };
       
+      editedEventIdsRef.current.add(ev.id);
+      editedEventIdsRef.current.add(newEv2.id);
+
       const next = [...prev];
       next.splice(targetIdx, 1, newEv1, newEv2);
       pushToHistory(next);
@@ -369,6 +438,7 @@ export default function SubtitleApp({ onBackToHome }) {
 
       const next = prev.map((ev, idx) => {
         if (idx >= targetIdx) {
+          editedEventIdsRef.current.add(ev.id);
           const s = Math.max(0, Math.round(((ev.start_time ?? ev.start ?? 0) + delta) * 1000) / 1000);
           const e = Math.max(s + 0.1, Math.round(((ev.end_time ?? ev.end ?? 0) + delta) * 1000) / 1000);
           return {
@@ -466,6 +536,7 @@ export default function SubtitleApp({ onBackToHome }) {
     if (file) {
       setSelectedFile(file);
       setCurrentVideoId(null);
+      setInitialWaveformPeaks([]);
       const url = URL.createObjectURL(file);
       setVideoUrl(url);
 
@@ -493,6 +564,9 @@ export default function SubtitleApp({ onBackToHome }) {
             const data = await res.json();
             if (data.video_id) {
               setCurrentVideoId(data.video_id);
+              if (data.peaks && data.peaks.length > 0) {
+                setInitialWaveformPeaks(data.peaks);
+              }
             }
           }
         } catch (err) {
@@ -528,21 +602,23 @@ export default function SubtitleApp({ onBackToHome }) {
     }
   };
 
-  // Single Subtitle Event Update
-  const handleUpdateEvent = (id, field, value) => {
+  // Single Subtitle Event Update (Instant 0ms latency typing)
+  const handleUpdateEvent = useCallback((id, field, value) => {
+    editedEventIdsRef.current.add(id);
     setEvents(prev => {
-      const next = prev.map(e => (e.id === id ? { ...e, [field]: value } : e));
-      pushToHistory(next);
-      handleLint(next);
+      const next = prev.map(e => ((e.id === id || e.event_id === id) ? { ...e, [field]: value } : e));
+      debouncedPushHistory(next);
+      debouncedLint(next);
       return next;
     });
-  };
+  }, [debouncedPushHistory, debouncedLint]);
 
   // Drag Time Change from Timeline
-  const handleEventTimeChange = (id, newStart, newEnd) => {
+  const handleEventTimeChange = useCallback((id, newStart, newEnd) => {
+    editedEventIdsRef.current.add(id);
     setEvents(prev => {
       const next = prev.map(e => {
-        if (e.id === id) {
+        if (e.id === id || e.event_id === id) {
           const dur = Math.max(0.1, newEnd - newStart);
           return {
             ...e,
@@ -555,35 +631,45 @@ export default function SubtitleApp({ onBackToHome }) {
         }
         return e;
       });
+      debouncedPushHistory(next);
+      debouncedLint(next);
       return next;
     });
-  };
+  }, [debouncedPushHistory, debouncedLint]);
 
   // Seek and Play Subtitle Event
-  const handlePlayEvent = (id) => {
-    const target = events.find(e => e.id === id);
-    if (target) {
-      const st = target.start_time !== undefined ? target.start_time : (target.start !== undefined ? target.start : 0);
-      const en = target.end_time !== undefined ? target.end_time : (target.end !== undefined ? target.end : 0);
-      setCurrentTime(st);
-      setPlayTarget({ time: st, endTime: en, pause: false });
-    }
-  };
+  const handlePlayEvent = useCallback((id) => {
+    setEvents(currentEvents => {
+      const target = currentEvents.find(e => (e.id === id || e.event_id === id));
+      if (target) {
+        const st = target.start_time !== undefined ? target.start_time : (target.start !== undefined ? target.start : 0);
+        const en = target.end_time !== undefined ? target.end_time : (target.end !== undefined ? target.end : 0);
+        setCurrentTime(st);
+        setPlayTarget({ time: st, endTime: en, pause: false });
+      }
+      return currentEvents;
+    });
+  }, []);
 
   // Split Event
-  const handleSplitEvent = (id) => {
-    const ev = events.find(e => e.id === id);
-    if (!ev) return;
-    const st = ev.start_time ?? ev.start ?? 0;
-    const en = ev.end_time ?? ev.end ?? 0;
-    const midTime = Math.round(((st + en) / 2) * 1000) / 1000;
-    handleSplitAtCursor(midTime);
-  };
+  const handleSplitEvent = useCallback((id) => {
+    editedEventIdsRef.current.add(id);
+    setEvents(prev => {
+      const ev = prev.find(e => (e.id === id || e.event_id === id));
+      if (!ev) return prev;
+      const st = ev.start_time ?? ev.start ?? 0;
+      const en = ev.end_time ?? ev.end ?? 0;
+      const midTime = Math.round(((st + en) / 2) * 1000) / 1000;
+      handleSplitAtCursor(midTime);
+      return prev;
+    });
+  }, [handleSplitAtCursor]);
 
   // Merge Event with Next
-  const handleMergeEvents = (id) => {
+  const handleMergeEvents = useCallback((id) => {
+    editedEventIdsRef.current.add(id);
     setEvents(prev => {
-      const idx = prev.findIndex(e => e.id === id);
+      const idx = prev.findIndex(e => (e.id === id || e.event_id === id));
       if (idx === -1 || idx >= prev.length - 1) return prev;
 
       const cur = prev[idx];
@@ -604,14 +690,15 @@ export default function SubtitleApp({ onBackToHome }) {
       handleLint(updated);
       return updated;
     });
-  };
+  }, [pushToHistory, handleLint]);
 
   // Delete Event
-  const handleDeleteEvent = (id) => {
+  const handleDeleteEvent = useCallback((id) => {
+    editedEventIdsRef.current.add(id);
     setEvents(prev => {
-      const idx = prev.findIndex(e => e.id === id);
+      const idx = prev.findIndex(e => (e.id === id || e.event_id === id));
       if (idx === -1) return prev;
-      const updated = prev.filter(e => e.id !== id);
+      const updated = prev.filter(e => (e.id !== id && e.event_id !== id));
       pushToHistory(updated);
       handleLint(updated);
       if (updated.length > 0) {
@@ -622,11 +709,12 @@ export default function SubtitleApp({ onBackToHome }) {
       }
       return updated;
     });
-  };
+  }, [pushToHistory, handleLint]);
 
   // Bulk Delete Multiple Subtitle Events
-  const handleBulkDelete = (idsToDelete) => {
+  const handleBulkDelete = useCallback((idsToDelete) => {
     if (!idsToDelete || idsToDelete.length === 0) return;
+    idsToDelete.forEach(id => editedEventIdsRef.current.add(id));
     const deleteSet = new Set(idsToDelete);
     setEvents(prev => {
       const updated = prev.filter(e => !deleteSet.has(e.id) && !deleteSet.has(e.event_id));
@@ -641,18 +729,22 @@ export default function SubtitleApp({ onBackToHome }) {
       }
       return renumbered;
     });
-  };
+  }, [pushToHistory, handleLint]);
 
   // Re-break Event Text
-  const handleRebreakEvent = async (id) => {
-    const ev = events.find(e => e.id === id);
-    if (!ev) return;
+  const handleRebreakEvent = useCallback(async (id) => {
+    let targetEv = null;
+    setEvents(prev => {
+      targetEv = prev.find(e => (e.id === id || e.event_id === id));
+      return prev;
+    });
+    if (!targetEv) return;
 
     try {
       const res = await fetch(`${API_BASE}/api/subtitle/rebreak`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ events: [ev], max_cpl: cplLimit })
+        body: JSON.stringify({ events: [targetEv], max_cpl: cplLimit })
       });
       if (res.ok) {
         const data = await res.json();
@@ -663,7 +755,7 @@ export default function SubtitleApp({ onBackToHome }) {
     } catch (err) {
       console.error(err);
     }
-  };
+  }, [cplLimit, handleUpdateEvent]);
 
   // Add Manual Subtitle
   const handleAddSubtitle = (atTime = null) => {
@@ -710,6 +802,8 @@ export default function SubtitleApp({ onBackToHome }) {
     setTotalErrors(0);
     setTotalWarnings(0);
     setActiveEventId(null);
+    editedEventIdsRef.current.clear();
+    setQcNotification(null);
 
     setIsGenerating(true);
     setProgressPercent(5);
@@ -755,6 +849,7 @@ export default function SubtitleApp({ onBackToHome }) {
         body: JSON.stringify({
           video_id: videoId,
           language,
+          script,
           content_type: contentType,
           sdh_mode: sdhMode,
           cpl_limit: cplLimit,
@@ -807,11 +902,31 @@ export default function SubtitleApp({ onBackToHome }) {
               // Append / Merge Batch Events Progressively in Real-Time!
               const newBatchEvents = data.events || [];
               accumulatedEvents = [...accumulatedEvents, ...newBatchEvents];
-              setEvents(accumulatedEvents);
+              setEvents(prev => {
+                const prevMap = new Map(prev.map(e => [e.id, e]));
+                const merged = [...prev];
+                for (const newEv of newBatchEvents) {
+                  if (!prevMap.has(newEv.id)) {
+                    merged.push(newEv);
+                  } else if (!editedEventIdsRef.current.has(newEv.id)) {
+                    // Update only if user hasn't manually edited this event
+                    const idx = merged.findIndex(e => e.id === newEv.id);
+                    if (idx !== -1) merged[idx] = newEv;
+                  }
+                }
+                return merged;
+              });
               if (!activeEventId && accumulatedEvents.length > 0) {
                 setActiveEventId(accumulatedEvents[0].id);
               }
-              console.log(`[Subtitle Studio] Ingested Batch ${data.chunk_index}/${data.total_chunks} (${newBatchEvents.length} events). User can edit now!`);
+              console.log(`[Subtitle Studio] Ingested Batch ${data.chunk_index}/${data.total_chunks} (${newBatchEvents.length} events). User edits strictly protected!`);
+            } else if (data.type === 'batch_ready') {
+              setQcNotification({
+                message: data.message || `Part ${data.chunk_index} is complete! You can do manual QC on it now.`,
+                chunkIndex: data.chunk_index,
+                totalChunks: data.total_chunks,
+                timestamp: Date.now()
+              });
             } else if (data.type === 'complete') {
               const res = data.result || {};
               const finalEvents = (res.events || accumulatedEvents).map(e => ({
@@ -819,7 +934,16 @@ export default function SubtitleApp({ onBackToHome }) {
                 start: e.start_time,
                 end: e.end_time
               }));
-              setEvents(finalEvents);
+              setEvents(prev => {
+                const prevMap = new Map(prev.map(e => [e.id, e]));
+                return finalEvents.map(e => {
+                  // Protect manual edits made by user while subsequent batches were generating
+                  if (editedEventIdsRef.current.has(e.id) && prevMap.has(e.id)) {
+                    return prevMap.get(e.id);
+                  }
+                  return e;
+                });
+              });
               pushToHistory(finalEvents);
               setComplianceScore(res.compliance_score || 100);
               setTotalErrors(res.total_errors || 0);
@@ -861,38 +985,7 @@ export default function SubtitleApp({ onBackToHome }) {
     }
   };
 
-  // Linting
-  const handleLint = async (updatedEvents) => {
-    try {
-      const res = await fetch(`${API_BASE}/api/subtitle/lint`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          events: updatedEvents,
-          shot_changes: shotChanges,
-          frame_rate: frameRate,
-          content_type: contentType,
-          custom_cpl: cplLimit,
-          custom_cps: cpsLimit,
-          custom_max_lines: maxLines,
-          custom_min_duration: minDuration,
-          custom_max_duration: maxDuration
-        })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setComplianceScore(data.compliance_score || 100);
-        setTotalErrors(data.total_errors || 0);
-        setTotalWarnings(data.total_warnings || 0);
-        setCpsStats(data.cps_stats || null);
-        if (data.events) {
-          setEvents(sanitizeEvents(data.events));
-        }
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
+
 
   // ── Gemini-Coordinated QC Self-Correction Pass ──
   const handleGeminiFix = async () => {
@@ -1217,6 +1310,58 @@ export default function SubtitleApp({ onBackToHome }) {
 
         {/* Right Menu Strip (CapCut Aesthetic) */}
         <div className="flex items-center gap-1.5">
+          {/* Language & Script Fast Selectors */}
+          <div className="flex items-center gap-1.5 bg-[#181920] border border-[#262734] px-2 py-0.5 rounded text-xs">
+            <Globe size={12} className="text-[#00e5be] shrink-0" />
+            <select
+              value={language}
+              onChange={(e) => {
+                setLanguage(e.target.value);
+                try { localStorage.setItem('karya_sub_language', e.target.value); } catch(_) {}
+              }}
+              disabled={isGenerating}
+              className="bg-transparent text-slate-200 font-semibold text-xs focus:outline-none cursor-pointer"
+              title="Target Spoken Language"
+            >
+              <option value="auto" className="bg-[#181920]">Auto-Detect</option>
+              <option value="hi" className="bg-[#181920]">Hindi (हिंदी)</option>
+              <option value="en" className="bg-[#181920]">English</option>
+              <option value="hinglish" className="bg-[#181920]">Hinglish (Hindi in Latin)</option>
+              <option value="bn" className="bg-[#181920]">Bengali (বাংলা)</option>
+              <option value="ta" className="bg-[#181920]">Tamil (தமிழ்)</option>
+              <option value="te" className="bg-[#181920]">Telugu (తెలుగు)</option>
+              <option value="mr" className="bg-[#181920]">Marathi (मराठी)</option>
+              <option value="gu" className="bg-[#181920]">Gujarati (ગુજરાતી)</option>
+              <option value="pa" className="bg-[#181920]">Punjabi (ਪੰਜਾਬੀ)</option>
+              <option value="kn" className="bg-[#181920]">Kannada (ಕನ್ನಡ)</option>
+              <option value="ml" className="bg-[#181920]">Malayalam (മലയാളം)</option>
+              <option value="ur" className="bg-[#181920]">Urdu (اردو)</option>
+              <option value="es" className="bg-[#181920]">Spanish (Español)</option>
+              <option value="fr" className="bg-[#181920]">French (Français)</option>
+              <option value="de" className="bg-[#181920]">German (Deutsch)</option>
+              <option value="ja" className="bg-[#181920]">Japanese (日本語)</option>
+              <option value="ko" className="bg-[#181920]">Korean (한국어)</option>
+              <option value="ar" className="bg-[#181920]">Arabic (العربية)</option>
+            </select>
+
+            <div className="h-3 w-px bg-[#262734]" />
+
+            <select
+              value={script}
+              onChange={(e) => {
+                setScript(e.target.value);
+                try { localStorage.setItem('karya_sub_script', e.target.value); } catch(_) {}
+              }}
+              disabled={isGenerating}
+              className="bg-transparent text-[#00e5be] font-semibold text-xs focus:outline-none cursor-pointer"
+              title="Target Output Script"
+            >
+              <option value="auto" className="bg-[#181920]">Native / Auto Script</option>
+              <option value="devanagari" className="bg-[#181920]">Devanagari (देवनागरी)</option>
+              <option value="latin" className="bg-[#181920]">Latin (Hinglish / Roman)</option>
+            </select>
+          </div>
+
           {/* Auto-Fix Button */}
           <button 
             onClick={handleAutoFix}
@@ -1418,7 +1563,8 @@ export default function SubtitleApp({ onBackToHome }) {
           <AudioWaveformTimeline 
             videoUrl={videoUrl}
             selectedFile={selectedFile}
-            videoId={currentVideoId}
+            videoId={currentVideoId || (selectedFile?.name ? selectedFile.name.replace(/\.[^/.]+$/, '') : null)}
+            initialPeaks={initialWaveformPeaks}
             API_BASE={API_BASE}
             isAudio={isAudioFile}
             events={events} 
@@ -1469,6 +1615,39 @@ export default function SubtitleApp({ onBackToHome }) {
         )}
       </div>
 
+      {/* ── Progressive Batch Ready QC Notification Toast ── */}
+      {qcNotification && (
+        <div className="fixed top-16 right-6 z-50 flex items-center gap-3 px-4 py-3 bg-[#131b18]/95 border border-[#00e5be]/60 rounded-xl shadow-2xl backdrop-blur-md animate-in fade-in slide-in-from-top-4 duration-300 text-slate-100 max-w-md">
+          <div className="w-8 h-8 rounded-lg bg-[#00e5be]/20 border border-[#00e5be]/40 flex items-center justify-center text-[#00e5be] shrink-0">
+            <CheckCircle2 className="w-4 h-4" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs font-bold text-white flex items-center gap-1.5">
+              <span>Part {qcNotification.chunkIndex} Complete</span>
+              <span className="px-1.5 py-0.2 bg-[#00e5be]/20 text-[#00e5be] rounded text-[9px] font-mono font-black uppercase">
+                Ready for Manual QC
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-300 truncate mt-0.5">
+              {qcNotification.message}
+            </div>
+            {isGenerating && (
+              <div className="text-[10px] text-emerald-400/80 font-mono mt-0.5 flex items-center gap-1">
+                <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                <span>Next part processing concurrently in background...</span>
+              </div>
+            )}
+          </div>
+          <button
+            onClick={() => setQcNotification(null)}
+            className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-white/10 transition shrink-0"
+            title="Dismiss notification"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* ── Subtitle & QC Settings Modal ── */}
       <SubtitleSettingsModal
         isOpen={showSettingsModal}
@@ -1486,6 +1665,8 @@ export default function SubtitleApp({ onBackToHome }) {
         setMaxDuration={setMaxDuration}
         language={language}
         setLanguage={setLanguage}
+        script={script}
+        setScript={setScript}
         contentType={contentType}
         setContentType={setContentType}
         sdhMode={sdhMode}

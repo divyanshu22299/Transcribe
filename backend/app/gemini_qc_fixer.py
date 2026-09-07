@@ -68,6 +68,17 @@ Your task is to fix subtitle events that have failed automated QC checks (CPL, C
 5. COMPLETE SENTENCES:
    - Maintain natural sentence formation. Do NOT leave awkward single-word or half-clause fragments.
 
+6. STRICT SINGLE-SPEAKER RULE (EXACTLY ONE SPEAKER PER EVENT):
+   - Each and every subtitle event MUST contain speech from EXACTLY ONE speaker!
+   - NEVER combine speech from two different speakers into a single subtitle event.
+   - NEVER use hyphen prefixes ('- Speaker 1\n- Speaker 2') within the same subtitle event.
+   - Set 'speakers' array to contain exactly one speaker identity (e.g. ['Speaker 1']).
+
+7. HINDI & MULTILINGUAL LINE BREAK RULES:
+   - Break lines at natural punctuation ('।', '॥', ',', '?') or before conjunctions ('और', 'या', 'लेकिन', 'क्योंकि', 'इसलिए', 'ताकि', 'कि', 'तो', 'and', 'but').
+   - NEVER break right before a Hindi postposition ('ने', 'को', 'से', 'का', 'के', 'की', 'में', 'पर', 'पे', 'तक') leaving it stranded on the next line! Keep postpositions with the preceding noun.
+   - NEVER sever honorifics/titles ('श्री', 'श्रीमती', 'डॉ.', 'Mr.', 'Mrs.').
+
 Return the fixed subtitles in strict JSON format conforming to the provided schema.
 """
 
@@ -88,11 +99,14 @@ def _has_fixable_errors(qc_errors: List[Dict[str, Any]]) -> bool:
         "NF-CPS-CHILD",
         "NF-MAX-LINES",
         "NF-LINE-BREAK",
+        "NF-LINE-BREAK-POSTPOSITION",
         "NF-DURATION-SHORT",
         "NF-DURATION-LONG",
         "NF-LINE-BREAK-PRONOUN",
         "NF-LINE-BREAK-TITLE",
         "NF-LINE-BREAK-NUMBER",
+        "NF-OVERLAP",
+        "NF-DUAL-SPEAKER",
     }
     for err in qc_errors:
         rule_id = err.get("rule_id", "")
@@ -318,7 +332,9 @@ Instructions:
         log_terminal("Re-aligning Gemini-fixed subtitles against Whisper acoustic boundaries...")
         rebuilt_events = align_subtitle_timestamps(rebuilt_events, whisper_words, search_radius=12.0)
 
-    # Step 5: Gap chaining & monotonic order enforcement
+    # Step 5: Split any multi-speaker events, gap chaining & monotonic order enforcement
+    from app.netflix_linter import split_multi_speaker_subtitles
+    rebuilt_events = split_multi_speaker_subtitles(rebuilt_events, frame_rate=frame_rate, min_duration=min_duration)
     rebuilt_events = auto_chain_gaps(rebuilt_events, frame_rate=frame_rate)
 
     # Step 6: Final lint check

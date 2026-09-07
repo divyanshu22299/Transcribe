@@ -16,8 +16,10 @@ export default function SubtitleSettingsModal({
   setMinDuration,
   maxDuration = 7.0,
   setMaxDuration,
-  language = 'en',
+  language = 'hi',
   setLanguage,
+  script = 'auto',
+  setScript,
   contentType = 'adult',
   setContentType,
   sdhMode = false,
@@ -300,32 +302,60 @@ export default function SubtitleSettingsModal({
               />
             </div>
 
-            {/* Language & SDH Toggles */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="p-3 rounded-xl border border-[#262734] bg-[#181920] flex items-center justify-between">
+            {/* Language, Script & SDH Toggles */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="p-3 rounded-xl border border-[#262734] bg-[#181920] flex flex-col justify-between gap-1.5">
                 <div>
                   <span className="font-bold text-xs block">Language Target</span>
-                  <span className="text-[10px] text-slate-400">Controls terminology & transcription</span>
+                  <span className="text-[10px] text-slate-400">Target spoken language</span>
                 </div>
                 <select
                   value={language}
                   onChange={e => setLanguage(e.target.value)}
-                  className="rounded-lg px-2 py-1 text-xs border border-[#262734] bg-[#0e0f12] text-white focus:border-[#00e5be] focus:outline-none"
+                  className="rounded-lg px-2 py-1 text-xs border border-[#262734] bg-[#0e0f12] text-white focus:border-[#00e5be] focus:outline-none cursor-pointer"
                 >
+                  <option value="auto">Auto-Detect</option>
+                  <option value="hi">Hindi (हिंदी)</option>
                   <option value="en">English</option>
-                  <option value="hi">Hindi</option>
-                  <option value="es">Spanish</option>
-                  <option value="fr">French</option>
-                  <option value="de">German</option>
-                  <option value="ja">Japanese</option>
-                  <option value="zh">Chinese</option>
+                  <option value="hinglish">Hinglish (Hindi in Latin)</option>
+                  <option value="bn">Bengali (বাংলা)</option>
+                  <option value="ta">Tamil (தமிழ்)</option>
+                  <option value="te">Telugu (తెలుగు)</option>
+                  <option value="mr">Marathi (मराठी)</option>
+                  <option value="gu">Gujarati (ગુજરાતી)</option>
+                  <option value="pa">Punjabi (ਪੰਜਾਬੀ)</option>
+                  <option value="kn">Kannada (ಕನ್ನಡ)</option>
+                  <option value="ml">Malayalam (മലയാളം)</option>
+                  <option value="ur">Urdu (اردو)</option>
+                  <option value="es">Spanish (Español)</option>
+                  <option value="fr">French (Français)</option>
+                  <option value="de">German (Deutsch)</option>
+                  <option value="ja">Japanese (日本語)</option>
+                  <option value="ko">Korean (한국어)</option>
+                  <option value="ar">Arabic (العربية)</option>
+                </select>
+              </div>
+
+              <div className="p-3 rounded-xl border border-[#262734] bg-[#181920] flex flex-col justify-between gap-1.5">
+                <div>
+                  <span className="font-bold text-xs block">Script / Alphabet</span>
+                  <span className="text-[10px] text-slate-400">Writing system for output</span>
+                </div>
+                <select
+                  value={script}
+                  onChange={e => setScript && setScript(e.target.value)}
+                  className="rounded-lg px-2 py-1 text-xs border border-[#262734] bg-[#0e0f12] text-[#00e5be] font-semibold focus:border-[#00e5be] focus:outline-none cursor-pointer"
+                >
+                  <option value="auto">Native / Auto Script</option>
+                  <option value="devanagari">Devanagari (देवनागरी)</option>
+                  <option value="latin">Latin / Romanized (Hinglish)</option>
                 </select>
               </div>
 
               <div className="p-3 rounded-xl border border-[#262734] bg-[#181920] flex items-center justify-between">
                 <div>
                   <span className="font-bold text-xs block">Sound Descriptions (SDH)</span>
-                  <span className="text-[10px] text-slate-400">Describe non-speech audio events [door slams]</span>
+                  <span className="text-[10px] text-slate-400">Non-speech sound cues [door slams]</span>
                 </div>
                 <input
                   type="checkbox"

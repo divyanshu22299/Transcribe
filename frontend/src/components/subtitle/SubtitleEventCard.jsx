@@ -17,7 +17,7 @@ function formatTime(secs) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
 }
 
-export default function SubtitleEventCard({
+function SubtitleEventCard({
   event,
   isActive = false,
   onActivate = () => {},
@@ -39,6 +39,8 @@ export default function SubtitleEventCard({
   const [localText, setLocalText] = useState(event.text || '');
   const textareaRef = useRef(null);
   const cardRef = useRef(null);
+  const debounceTimerRef = useRef(null);
+  const isFocusedRef = useRef(false);
   const nudgeStep = 1 / frameRate; // 1 frame (~0.042s)
 
   // Auto-scroll active card into view
@@ -48,10 +50,21 @@ export default function SubtitleEventCard({
     }
   }, [isActive]);
 
-  // Sync localText with incoming event updates
+  // Sync localText with incoming event updates when not actively typing
   useEffect(() => {
-    setLocalText(event.text || '');
+    if (!isFocusedRef.current) {
+      setLocalText(event.text || '');
+    }
   }, [event.text]);
+
+  // Clean up debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
 
   const start = event.start_time !== undefined ? event.start_time : (event.start !== undefined ? event.start : 0);
   const end = event.end_time !== undefined ? event.end_time : (event.end !== undefined ? event.end : 0);
@@ -105,11 +118,34 @@ export default function SubtitleEventCard({
     });
   }, [event.qc_errors, event.errors]);
 
-  // Handle immediate text typing
+  // Handle immediate text typing with debounce to parent
   const handleTextChange = (e) => {
     const newText = e.target.value;
     setLocalText(newText);
-    onUpdate(event.id, 'text', newText);
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = setTimeout(() => {
+      onUpdate(event.id, 'text', newText);
+      debounceTimerRef.current = null;
+    }, 300);
+  };
+
+  // Immediate flush on blur so text is never lost
+  const handleTextareaBlur = () => {
+    isFocusedRef.current = false;
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    if (localText !== (event.text || '')) {
+      onUpdate(event.id, 'text', localText);
+    }
+  };
+
+  const handleTextareaFocus = () => {
+    isFocusedRef.current = true;
+    onActivate(event.id);
   };
 
   // Nudge timing
@@ -143,6 +179,10 @@ export default function SubtitleEventCard({
       } else {
         updated = `<i>${val}</i>`;
       }
+    }
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
     }
     setLocalText(updated);
     onUpdate(event.id, 'text', updated);
@@ -380,8 +420,9 @@ export default function SubtitleEventCard({
           ref={textareaRef}
           value={localText}
           onChange={handleTextChange}
+          onBlur={handleTextareaBlur}
+          onFocus={handleTextareaFocus}
           onKeyDown={handleTextareaKeyDown}
-          onFocus={() => onActivate(event.id)}
           placeholder="Enter dialogue text (Ctrl+I for italics)..."
           rows={Math.max(2, metrics.lineCount)}
           className={`w-full bg-[#0e0f12] border rounded-lg px-2.5 py-1.5 text-[13px] font-sans leading-relaxed resize-none focus:outline-none transition-all ${
@@ -459,3 +500,28 @@ export default function SubtitleEventCard({
     </div>
   );
 }
+
+function arePropsEqual(prevProps, nextProps) {
+  if (prevProps.isActive !== nextProps.isActive) return false;
+  if (prevProps.cplLimit !== nextProps.cplLimit) return false;
+  if (prevProps.cpsLimit !== nextProps.cpsLimit) return false;
+  if (prevProps.frameRate !== nextProps.frameRate) return false;
+  if (prevProps.showMerge !== nextProps.showMerge) return false;
+  if (prevProps.theme !== nextProps.theme) return false;
+
+  const pEv = prevProps.event;
+  const nEv = nextProps.event;
+  if (pEv === nEv) return true;
+  if (pEv.id !== nEv.id) return false;
+  if (pEv.text !== nEv.text) return false;
+  if (pEv.start_time !== nEv.start_time || pEv.end_time !== nEv.end_time) return false;
+  if (pEv.start !== nEv.start || pEv.end !== nEv.end) return false;
+
+  const pErrors = pEv.qc_errors || pEv.errors || [];
+  const nErrors = nEv.qc_errors || nEv.errors || [];
+  if (pErrors.length !== nErrors.length) return false;
+
+  return true;
+}
+
+export default React.memo(SubtitleEventCard, arePropsEqual);

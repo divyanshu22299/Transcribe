@@ -61,11 +61,34 @@ CHAIN_THRESHOLD_FRAMES = 12  # Gaps < 12 frames must be chained to 2-frame gap
 SHOT_SNAP_THRESHOLD_FRAMES = 2   # Snap in/out if within 2 frames of cut
 SHOT_PROXIMITY_FRAMES = 12       # 12-frame proximity zone around cuts
 
-# Line break: words that should NOT start a new line (articles, pronouns, short prepositions)
+# Hindi & Hinglish postpositions (कारक चिन्ह) - must NEVER start a new line or event alone!
+HINDI_POSTPOSITIONS = {
+    "ने", "को", "से", "का", "के", "की", "में", "पर", "पे", "तक", "लिए", "साथ", "द्वारा", "वाला", "वाले", "वाली",
+    "ne", "ko", "se", "ka", "ke", "ki", "mein", "me", "par", "pe", "tak", "liye", "saath", "dwara", "wala", "wale", "wali",
+}
+
+# Hindi & Hinglish conjunctions (समुच्चयबोधक अव्यय) - natural clause and line break points
+HINDI_CONJUNCTIONS = {
+    "और", "या", "अथवा", "लेकिन", "मगर", "किंतु", "परंतु", "क्योंकि", "इसलिए", "ताकि", "कि", "तो", "जब", "तब", "अगर", "यदि", "जैसे", "वैसे", "फिर", "भी",
+    "aur", "ya", "athwa", "lekin", "magar", "kintu", "parantu", "kyunki", "isliye", "taaki", "ki", "to", "jab", "tab", "agar", "yadi", "jaise", "phir", "bhi",
+}
+
+# Hindi titles & honorifics - never sever from following name
+HINDI_TITLES = {
+    "श्री", "श्रीमती", "सुश्री", "डॉक्टर", "डॉ.", "डॉ", "पंडित", "पं.", "पं", "प्रोफेसर", "प्रो.", "प्रो",
+    "shri", "smt", "sushri", "pandit",
+}
+
+# Line break: words that should NOT start a new line (articles, pronouns, short prepositions, Hindi postpositions)
 NO_BREAK_BEFORE = {
     "a", "an", "the", "i", "he", "she", "it", "we", "you", "they",
     "me", "my", "his", "her", "its", "our", "your", "their",
     "am", "is", "are", "was", "were",
+    # Hindi postpositions
+    *HINDI_POSTPOSITIONS,
+    # Hindi auxiliaries
+    "है", "हैं", "था", "थी", "थे", "होगा", "होगी", "होंगे", "रहा", "रही", "रहे", "सकता", "सकती", "सकते",
+    "hai", "hain", "tha", "thi", "the", "hoga", "hogi", "honge", "raha", "rahi", "rahe", "sakta", "sakti", "sakte",
 }
 
 # Words that are GOOD break points (conjunctions, prepositions)
@@ -76,6 +99,7 @@ GOOD_BREAK_BEFORE = {
     "in", "on", "at", "to", "from", "with", "by", "about", "into",
     "through", "during", "without", "between", "among", "upon",
     "of", "than", "that", "which", "who", "whom", "whose",
+    *HINDI_CONJUNCTIONS,
 }
 
 # Orphan: a single word on line 2 shorter than this is flagged
@@ -250,7 +274,7 @@ def detect_bad_line_breaks(text: str) -> List[Dict[str, str]]:
             })
         
         # Rule: Don't split pronoun + verb (only when not separated by clause punctuation)
-        has_clause_break = upper_words[-1].endswith((',', ';', ':', '--', '…', '.', '!', '?'))
+        has_clause_break = upper_words[-1].endswith((',', ';', ':', '--', '…', '.', '!', '?', '।', '॥'))
         if not has_clause_break and last_word_upper in {'i', 'he', 'she', 'it', 'we', 'you', 'they'}:
             violations.append({
                 "rule_id": "NF-LINE-BREAK-PRONOUN",
@@ -258,12 +282,21 @@ def detect_bad_line_breaks(text: str) -> List[Dict[str, str]]:
                 "suggested_fix": f"Keep '{upper_words[-1]} {lower_words[0]}' on the same line.",
             })
         
-        # Rule: Don't split title/honorific + name
-        if last_word_upper in {'mr', 'mrs', 'ms', 'dr', 'prof', 'sir', 'mr.', 'mrs.', 'ms.', 'dr.', 'prof.'}:
+        # Rule: Don't split title/honorific + name (English & Hindi)
+        all_titles = {'mr', 'mrs', 'ms', 'dr', 'prof', 'sir', 'mr.', 'mrs.', 'ms.', 'dr.', 'prof.', *HINDI_TITLES}
+        if last_word_upper in all_titles:
             violations.append({
                 "rule_id": "NF-LINE-BREAK-TITLE",
                 "message": f"Title/honorific '{upper_words[-1]}' separated from name '{lower_words[0]}' across lines.",
                 "suggested_fix": f"Keep '{upper_words[-1]} {lower_words[0]}' on the same line.",
+            })
+
+        # Rule: Don't split Hindi noun + postposition (postposition stranded on line 2)
+        if first_word_lower in HINDI_POSTPOSITIONS and not has_clause_break:
+            violations.append({
+                "rule_id": "NF-LINE-BREAK-POSTPOSITION",
+                "message": f"Hindi postposition '{lower_words[0]}' severed from noun '{upper_words[-1]}' across lines.",
+                "suggested_fix": f"Keep '{upper_words[-1]} {lower_words[0]}' together on the upper line or rebreak before noun.",
             })
         
         # Rule: Don't split number + unit
@@ -329,8 +362,8 @@ def optimize_line_breaks(text: str, max_cpl: int = 42) -> str:
         if break_word in GOOD_BREAK_BEFORE:
             score -= 10.0
         
-        # Bonus for breaking after punctuation
-        if upper.rstrip()[-1:] in {',', '.', ';', ':', '!', '?', '—', '–'}:
+        # Bonus for breaking after punctuation (English & Hindi)
+        if upper.rstrip()[-1:] in {',', '.', ';', ':', '!', '?', '—', '–', '।', '॥', '…'}:
             score -= 15.0
         
         # Heavy penalty for bad breaks
@@ -339,8 +372,10 @@ def optimize_line_breaks(text: str, max_cpl: int = 42) -> str:
             score += 50.0
         if last_upper in {'i', 'he', 'she', 'it', 'we', 'you', 'they'}:  # pronoun + verb split
             score += 50.0
-        if last_upper in {'mr', 'mrs', 'ms', 'dr', 'prof', 'mr.', 'mrs.', 'ms.', 'dr.', 'prof.'}:
+        if last_upper in {'mr', 'mrs', 'ms', 'dr', 'prof', 'mr.', 'mrs.', 'ms.', 'dr.', 'prof.', *HINDI_TITLES}:
             score += 50.0
+        if break_word in HINDI_POSTPOSITIONS:  # Postposition stranded on lower line
+            score += 75.0
         if words[split_pos - 1].replace(',', '').replace('.', '').isdigit():
             unit_words = {'miles', 'km', 'meters', 'feet', 'dollars', 'euros', 'percent',
                          'hours', 'minutes', 'seconds', 'mph', 'kph'}
@@ -937,19 +972,34 @@ def auto_chain_gaps(
     for i in range(len(events) - 1):
         curr_end = float(events[i].get("end_time", 0))
         next_start = float(events[i + 1].get("start_time", 0))
+        curr_start = float(events[i].get("start_time", 0))
+        next_end = float(events[i + 1].get("end_time", next_start + 2.0))
         
         gap_seconds = next_start - curr_end
         gap_frames = _seconds_to_frames(gap_seconds, frame_rate)
         
-        if gap_seconds < 0:
-            # Overlap: set end to 2 frames before next start
-            events[i]["end_time"] = round(next_start - min_gap, 6)
-        elif gap_frames < MIN_GAP_FRAMES:
-            # Gap too small: adjust to minimum 2-frame gap
-            events[i]["end_time"] = round(next_start - min_gap, 6)
+        # Strict timeline non-overlap & gap enforcement
+        if gap_seconds < min_gap:
+            target_end = round(next_start - min_gap, 6)
+            if target_end - curr_start >= 0.833:
+                events[i]["end_time"] = target_end
+                events[i]["end"] = target_end
+            else:
+                # If shortening curr_end would make duration < 0.833s, enforce min duration on curr and push next_start
+                if curr_end - curr_start < 0.833:
+                    curr_end = round(curr_start + 0.833, 6)
+                    events[i]["end_time"] = curr_end
+                    events[i]["end"] = curr_end
+                new_next_start = round(curr_end + min_gap, 6)
+                events[i + 1]["start_time"] = new_next_start
+                events[i + 1]["start"] = new_next_start
+                if float(events[i + 1].get("end_time", 0)) < new_next_start + 0.833:
+                    events[i + 1]["end_time"] = round(new_next_start + 0.833, 6)
+                    events[i + 1]["end"] = events[i + 1]["end_time"]
         elif MIN_GAP_FRAMES < gap_frames < CHAIN_THRESHOLD_FRAMES:
             # Flicker zone: chain to 2-frame gap
             events[i]["end_time"] = round(next_start - min_gap, 6)
+            events[i]["end"] = events[i]["end_time"]
     
     # Update durations and formatted timestamps
     for event in events:
@@ -1062,10 +1112,14 @@ def split_dense_text_at_natural_boundary(text: str, max_cpl: int = 42) -> List[s
     total_len = len(clean)
     mid = total_len // 2
     
-    # Priority 1: Sentence or clause-ending punctuation near middle (. , ! ? ; — –)
+    # Priority 1: Sentence or clause-ending punctuation near middle (. , ! ? ; — – । ॥ …)
     candidates = []
-    for m in re.finditer(r'([.,!?;:—–])\s+', clean):
+    for m in re.finditer(r'([.,!?;:—–।॥…])\s+', clean):
         pos = m.end()
+        # Ensure split does not strand a Hindi postposition at the start of part 2
+        remainder = clean[pos:].strip().split()
+        if remainder and remainder[0].lower().rstrip('.,!?;:।॥…') in HINDI_POSTPOSITIONS:
+            continue
         candidates.append((abs(pos - mid), pos))
     
     if candidates:
@@ -1076,10 +1130,17 @@ def split_dense_text_at_natural_boundary(text: str, max_cpl: int = 42) -> List[s
         if p1 and p2:
             return [p1, p2]
             
-    # Priority 2: Coordinating/subordinating conjunctions
+    # Priority 2: Coordinating/subordinating conjunctions (English & Hindi)
     conj_candidates = []
-    for m in re.finditer(r'\b(and|but|because|so|while|when|that|which|or|although|though)\b', clean, re.IGNORECASE):
+    conj_pattern = re.compile(
+        r'(?:\b(and|but|because|so|while|when|that|which|or|although|though|aur|lekin|magar|kintu|parantu|kyunki|isliye|taaki|agar)\b|(?<=\s)(और|या|अथवा|लेकिन|मगर|किंतु|परंतु|क्योंकि|इसलिए|ताकि|कि|तो|जब|तब|अगर|यदि)(?=\s))',
+        re.IGNORECASE
+    )
+    for m in conj_pattern.finditer(clean):
         pos = m.start()
+        remainder = clean[pos:].strip().split()
+        if remainder and remainder[0].lower().rstrip('.,!?;:।॥…') in HINDI_POSTPOSITIONS:
+            continue
         conj_candidates.append((abs(pos - mid), pos))
         
     if conj_candidates:
@@ -1094,6 +1155,9 @@ def split_dense_text_at_natural_boundary(text: str, max_cpl: int = 42) -> List[s
     prep_candidates = []
     for m in re.finditer(r'\b(in|at|on|with|of|for|to|from|by|into|about)\b', clean, re.IGNORECASE):
         pos = m.start()
+        remainder = clean[pos:].strip().split()
+        if remainder and remainder[0].lower().rstrip('.,!?;:।॥…') in HINDI_POSTPOSITIONS:
+            continue
         prep_candidates.append((abs(pos - mid), pos))
         
     if prep_candidates:
@@ -1104,8 +1168,11 @@ def split_dense_text_at_natural_boundary(text: str, max_cpl: int = 42) -> List[s
         if p1 and p2:
             return [p1, p2]
             
-    # Fallback: Word split closest to middle
+    # Fallback: Word split closest to middle (ensuring postposition is not severed)
     mid_word = len(words) // 2
+    if mid_word < len(words) and words[mid_word].lower().rstrip('.,!?;:।॥…') in HINDI_POSTPOSITIONS:
+        # Move postposition into part 1 with its preceding noun
+        mid_word = min(len(words) - 1, mid_word + 1)
     return [' '.join(words[:mid_word]), ' '.join(words[mid_word:])]
 
 
@@ -1200,6 +1267,124 @@ def rebalance_words_across_adjacent_events(
     return events
 
 
+def split_multi_speaker_subtitles(
+    events: List[Dict[str, Any]],
+    frame_rate: float = 24.0,
+    min_duration: float = 0.833,
+) -> List[Dict[str, Any]]:
+    """
+    Guarantees that EVERY subtitle event belongs to EXACTLY ONE speaker.
+    If an event contains multiple speakers (dual-hyphen lines, multiple speaker tags,
+    or len(speakers) > 1), automatically splits it into distinct, sequential,
+    non-overlapping single-speaker subtitle events.
+    """
+    if not events:
+        return []
+
+    min_gap_sec = 2.0 / frame_rate if frame_rate > 0 else 0.083
+    result = []
+
+    prefix_pattern = re.compile(r'^([A-Za-z0-9_\u0900-\u097F\s]{1,25}):\s*(.*)$')
+
+    for ev in events:
+        text = str(ev.get("text", "")).strip()
+        speakers = ev.get("speakers", [])
+        if isinstance(speakers, str):
+            speakers = [speakers]
+        elif not isinstance(speakers, list):
+            speakers = ["Speaker 1"]
+
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+
+        # Condition A: 2 or more lines starting with hyphen / dash (e.g. '- Speaker 1\n- Speaker 2')
+        hyphen_lines = [l for l in lines if l.startswith(("-", "—", "–"))]
+        is_dual_hyphen = (len(hyphen_lines) >= 2 and len(hyphen_lines) == len(lines))
+
+        # Condition B: Multiple speaker names present in speakers list (len > 1)
+        has_multiple_speakers = len(speakers) > 1
+
+        # Condition C: Explicit speaker prefixes like "Speaker 1: ..." and "Speaker 2: ..."
+        speaker_prefixed_lines = []
+        for l in lines:
+            m = prefix_pattern.match(l)
+            if m:
+                speaker_prefixed_lines.append((m.group(1).strip(), m.group(2).strip()))
+            else:
+                speaker_prefixed_lines.append((None, l))
+        has_different_prefix_speakers = (
+            len(speaker_prefixed_lines) >= 2
+            and speaker_prefixed_lines[0][0] is not None
+            and speaker_prefixed_lines[1][0] is not None
+            and speaker_prefixed_lines[0][0] != speaker_prefixed_lines[1][0]
+        )
+
+        should_split = is_dual_hyphen or has_multiple_speakers or has_different_prefix_speakers
+
+        if not should_split or len(lines) < 2:
+            # Single speaker event! Just ensure speaker array has exactly 1 speaker
+            clean_ev = dict(ev)
+            clean_ev["speakers"] = [speakers[0]] if speakers else ["Speaker 1"]
+            clean_ev["speaker_count"] = 1
+            result.append(clean_ev)
+            continue
+
+        # Multiple speakers detected in this single event! Split into distinct single-speaker events.
+        st = float(ev.get("start_time", ev.get("start", 0.0)))
+        et = float(ev.get("end_time", ev.get("end", st + 2.0)))
+        dur = max(0.05, et - st)
+
+        # Prepare sub-event items: [(speaker_name, clean_text)]
+        sub_items = []
+        for idx, l in enumerate(lines):
+            clean_l = l
+            # Strip leading hyphen/dash from individual speaker lines
+            if clean_l.startswith(("-", "—", "–")):
+                clean_l = re.sub(r'^[-—–]\s*', '', clean_l).strip()
+
+            spk_name = None
+            if idx < len(speaker_prefixed_lines) and speaker_prefixed_lines[idx][0]:
+                spk_name = speaker_prefixed_lines[idx][0]
+                clean_l = speaker_prefixed_lines[idx][1]
+            elif idx < len(speakers):
+                spk_name = speakers[idx]
+            else:
+                spk_name = f"Speaker {idx + 1}"
+
+            if clean_l:
+                sub_items.append((spk_name, clean_l))
+
+        if not sub_items:
+            result.append(dict(ev))
+            continue
+
+        total_chars = max(1, sum(len(txt) for _, txt in sub_items))
+
+        # Proportional non-overlapping duration allocation
+        cur_start = st
+        for idx, (spk_name, txt) in enumerate(sub_items):
+            ratio = len(txt) / total_chars
+            item_dur = max(min_duration, round(dur * ratio, 3))
+            item_end = round(cur_start + item_dur, 3)
+
+            sub_ev = dict(ev)
+            sub_ev["text"] = txt
+            sub_ev["speakers"] = [spk_name]
+            sub_ev["speaker_count"] = 1
+            sub_ev["start_time"] = cur_start
+            sub_ev["end_time"] = item_end
+            sub_ev["start"] = cur_start
+            sub_ev["end"] = item_end
+            sub_ev["duration"] = round(item_end - cur_start, 3)
+            sub_ev["start_time_str"] = format_timestamp(cur_start)
+            sub_ev["end_time_str"] = format_timestamp(item_end)
+            result.append(sub_ev)
+
+            # Advance with minimum gap for the next speaker (strictly non-overlapping)
+            cur_start = round(item_end + min_gap_sec, 3)
+
+    return result
+
+
 def format_and_split_subtitle_events(
     events: List[Dict[str, Any]],
     cpl_limit: int = 42,
@@ -1211,6 +1396,7 @@ def format_and_split_subtitle_events(
 ) -> List[Dict[str, Any]]:
     """
     Format every subtitle event to strictly conform to Netflix CPL, CPS, and Line Break rules.
+    - Guarantees EXACTLY ONE speaker per event (splits multi-speaker events).
     - If an event's text is too long for max_lines * cpl_limit (or causes excessive CPS),
       splits it into 2 sequential timed events at natural linguistic boundaries.
     - Re-breaks text into 1-2 lines so NO line exceeds cpl_limit.
@@ -1222,6 +1408,9 @@ def format_and_split_subtitle_events(
 
     min_gap_sec = 2.0 / frame_rate if frame_rate > 0 else 0.083
     max_chars_per_event = max_lines * cpl_limit
+
+    # Pass 0: Guarantee single speaker per event (never 2 speakers in 1 subtitle)
+    events = split_multi_speaker_subtitles(events, frame_rate=frame_rate, min_duration=min_duration)
 
     # Pass 1: Text splitting for dense events
     split_pass_events = []
@@ -1310,7 +1499,10 @@ def format_and_split_subtitle_events(
                 rechecked_lines.append(l)
 
         if len(rechecked_lines) > max_lines:
-            rechecked_lines = rechecked_lines[:max_lines]
+            # Merge excess lines into line 2 to guarantee zero words dropped
+            l1 = rechecked_lines[0]
+            l2 = ' '.join(rechecked_lines[1:])
+            rechecked_lines = [l1, l2]
 
         final_text = '\n'.join(rechecked_lines)
         st = float(ev.get("start_time", ev.get("start", 0.0)))

@@ -1,4 +1,6 @@
 import os
+import re
+import urllib.parse
 import asyncio
 import shutil
 import uuid
@@ -974,17 +976,56 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
         
     video_id = Path(safe_filename).stem
 
-    # Pre-extract or convert audio for instant waveform rendering and ultra-fast generation
+    # Pre-extract or resolve audio path for instant waveform rendering
     audio_path = None
-    try:
-        from app.video_processor import extract_audio_from_video
-        audio_info = await asyncio.to_thread(extract_audio_from_video, str(file_path))
-        audio_path = audio_info.get("audio_path")
-    except Exception as e:
-        print(f"Non-fatal audio extraction warning during upload: {e}")
+    if ext in [".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma"]:
+        audio_path = str(file_path)
+    else:
+        try:
+            from app.video_processor import extract_audio_from_video
+            audio_info = await asyncio.to_thread(extract_audio_from_video, str(file_path))
+            audio_path = audio_info.get("audio_path")
+        except Exception as e:
+            print(f"Non-fatal audio extraction warning during upload: {e}")
 
     if not audio_path and ext == ".wav":
         audio_path = str(file_path)
+
+    # ── Instant Waveform Pre-Calculation & Disk Caching ──
+    peaks_payload = []
+    cache_path = UPLOAD_DIR / f"{video_id}.peaks.json"
+    if cache_path.exists():
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                cdata = json.load(f)
+                peaks_payload = cdata.get("peaks", [])
+        except Exception:
+            pass
+    else:
+        # Check if pre-computed peaks already exist for this media stem (instant reuse)
+        existing_caches = list(UPLOAD_DIR.glob(f"*{clean_stem}*.peaks.json"))
+        if not existing_caches and raw_stem != clean_stem:
+            existing_caches = list(UPLOAD_DIR.glob(f"*{raw_stem}*.peaks.json"))
+        if existing_caches:
+            try:
+                with open(existing_caches[0], "r", encoding="utf-8") as f:
+                    cdata = json.load(f)
+                peaks_payload = cdata.get("peaks", [])
+                with open(cache_path, "w", encoding="utf-8") as f:
+                    json.dump(cdata, f)
+            except Exception:
+                pass
+
+    if not peaks_payload and audio_path and os.path.exists(audio_path):
+        try:
+            from app.audio_processor import compute_acoustic_waveform_peaks
+            wdata = await asyncio.to_thread(compute_acoustic_waveform_peaks, str(audio_path), 50)
+            wdata["video_id"] = video_id
+            peaks_payload = wdata.get("peaks", [])
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump(wdata, f)
+        except Exception as e:
+            print(f"Non-fatal pre-waveform computation note: {e}")
 
     active_sessions[video_id] = {
         "filename": safe_filename,
@@ -997,7 +1038,9 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
     return {
         "video_id": video_id,
         "filename": safe_filename,
-        "metadata": metadata
+        "metadata": metadata,
+        "peaks": peaks_payload,
+        "points_per_sec": 50
     }
 
 
@@ -1005,7 +1048,6 @@ def resolve_active_session_video(video_id: str) -> Optional[str]:
     """Resolve media path (video or audio) from in-memory active_sessions or automatically restore from disk in UPLOAD_DIR."""
     if not video_id:
         return None
-    import urllib.parse
     video_id = urllib.parse.unquote(str(video_id)).strip()
     if video_id in active_sessions and os.path.exists(active_sessions[video_id].get("file_path", "")):
         return active_sessions[video_id]["file_path"]
@@ -1027,7 +1069,7 @@ def resolve_active_session_video(video_id: str) -> Optional[str]:
             return str(cand)
 
     # Check prefix / substring match
-    matches = list(UPLOAD_DIR.glob(f"{video_id}*"))
+    matches = list(UPLOAD_DIR.glob(f"{video_id}*")) or list(UPLOAD_DIR.glob(f"*{video_id}*"))
     media_matches = [m for m in matches if m.is_file() and m.suffix.lower() in supported_exts]
     if media_matches:
         cand = media_matches[0]
@@ -1047,9 +1089,40 @@ def resolve_active_session_video(video_id: str) -> Optional[str]:
 
 @app.get("/api/subtitle/waveform/{video_id}")
 async def get_subtitle_waveform_endpoint(video_id: str, points_per_sec: int = 50):
-    """Return high-precision acoustic waveform peaks for video_id matching speech ups and lows."""
-    import urllib.parse
+    """Return high-precision acoustic waveform peaks for video_id with instant disk cache lookup."""
     video_id = urllib.parse.unquote(str(video_id)).strip()
+
+    # 1. Instant Disk Cache Lookup (< 20ms response time, Subtitle Edit level instant loading)
+    cache_candidates = [
+        UPLOAD_DIR / f"{video_id}.peaks.json",
+        UPLOAD_DIR / f"{video_id}_audio.peaks.json",
+        UPLOAD_DIR / f"{video_id}.wav.peaks.json"
+    ]
+    for c in cache_candidates:
+        if c.exists():
+            try:
+                with open(c, "r", encoding="utf-8") as f:
+                    cdata = json.load(f)
+                cdata["video_id"] = video_id
+                return cdata
+            except Exception:
+                pass
+
+    # Prefix or substring match in cache
+    cache_matches = list(UPLOAD_DIR.glob(f"{video_id}*.peaks.json")) or list(UPLOAD_DIR.glob(f"*{video_id}*.peaks.json"))
+    clean_id = re.sub(r'[^\w\.-]', '_', video_id).strip()
+    if not cache_matches and clean_id != video_id:
+        cache_matches = list(UPLOAD_DIR.glob(f"*{clean_id}*.peaks.json"))
+
+    for c in cache_matches:
+        try:
+            with open(c, "r", encoding="utf-8") as f:
+                cdata = json.load(f)
+            cdata["video_id"] = video_id
+            return cdata
+        except Exception:
+            pass
+
     audio_path = None
     if video_id in active_sessions and active_sessions[video_id].get("audio_path"):
         cand = Path(active_sessions[video_id]["audio_path"])
@@ -1086,6 +1159,15 @@ async def get_subtitle_waveform_endpoint(video_id: str, points_per_sec: int = 50
         from app.audio_processor import compute_acoustic_waveform_peaks
         waveform_data = await asyncio.to_thread(compute_acoustic_waveform_peaks, str(audio_path), points_per_sec)
         waveform_data["video_id"] = video_id
+        
+        # Save to cache immediately for future sub-second loading
+        try:
+            target_cache = UPLOAD_DIR / f"{video_id}.peaks.json"
+            with open(target_cache, "w", encoding="utf-8") as f:
+                json.dump(waveform_data, f)
+        except Exception:
+            pass
+
         return waveform_data
     except Exception as e:
         import traceback
@@ -1140,7 +1222,8 @@ async def generate_subtitles_endpoint(payload: dict):
 async def generate_subtitles_stream_endpoint(payload: dict):
     """Progressively stream subtitle batches using Server-Sent Events (SSE) with dynamic settings."""
     video_id = payload.get("video_id")
-    language = payload.get("language", "en")
+    language = payload.get("language", "auto")
+    script = payload.get("script", "auto")
     content_type = payload.get("content_type", "adult")
     sdh_mode = payload.get("sdh_mode", False)
     cpl_limit = int(payload.get("cpl_limit", 42))
@@ -1161,6 +1244,7 @@ async def generate_subtitles_stream_endpoint(payload: dict):
         generate_subtitles_stream(
             video_path=video_path,
             language=language,
+            script=script,
             content_type=content_type,
             sdh_mode=sdh_mode,
             cpl_limit=cpl_limit,

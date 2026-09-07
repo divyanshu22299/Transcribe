@@ -206,6 +206,65 @@ def group_whisper_words_into_subtitles(
     return events
 
 
+def normalize_language_and_script(language: str, script: str = "auto") -> tuple:
+    """Normalize language and script codes/names into clean presentation strings."""
+    lang_lower = (language or "auto").lower().strip()
+    script_lower = (script or "auto").lower().strip()
+
+    lang_map = {
+        "hi": ("Hindi", "Devanagari"),
+        "hindi": ("Hindi", "Devanagari"),
+        "hinglish": ("Hindi", "Latin (Hinglish)"),
+        "en": ("English", "Latin"),
+        "english": ("English", "Latin"),
+        "bn": ("Bengali", "Bengali"),
+        "bengali": ("Bengali", "Bengali"),
+        "ta": ("Tamil", "Tamil"),
+        "tamil": ("Tamil", "Tamil"),
+        "te": ("Telugu", "Telugu"),
+        "telugu": ("Telugu", "Telugu"),
+        "mr": ("Marathi", "Devanagari"),
+        "marathi": ("Marathi", "Devanagari"),
+        "gu": ("Gujarati", "Gujarati"),
+        "gujarati": ("Gujarati", "Gujarati"),
+        "kn": ("Kannada", "Kannada"),
+        "kannada": ("Kannada", "Kannada"),
+        "ml": ("Malayalam", "Malayalam"),
+        "malayalam": ("Malayalam", "Malayalam"),
+        "pa": ("Punjabi", "Gurmukhi"),
+        "punjabi": ("Punjabi", "Gurmukhi"),
+        "ur": ("Urdu", "Arabic"),
+        "urdu": ("Urdu", "Arabic"),
+        "es": ("Spanish", "Latin"),
+        "spanish": ("Spanish", "Latin"),
+        "fr": ("French", "Latin"),
+        "french": ("French", "Latin"),
+        "de": ("German", "Latin"),
+        "german": ("German", "Latin"),
+        "ja": ("Japanese", "Japanese"),
+        "japanese": ("Japanese", "Japanese"),
+        "ko": ("Korean", "Hangul"),
+        "korean": ("Korean", "Hangul"),
+        "ar": ("Arabic", "Arabic"),
+        "arabic": ("Arabic", "Arabic"),
+        "auto": ("Auto-Detect", "Auto-Detect"),
+    }
+
+    resolved_lang, default_script = lang_map.get(lang_lower, (language.title() if language else "Auto-Detect", "Auto-Detect"))
+    is_hindi = lang_lower in ["hi", "hindi", "hinglish"]
+    
+    if script_lower in ["devanagari", "native"]:
+        resolved_script = "Devanagari" if is_hindi or "marathi" in lang_lower or lang_lower == "mr" else default_script
+    elif script_lower in ["latin", "hinglish", "roman", "romanized"]:
+        resolved_script = "Latin (Hinglish)" if is_hindi else "Latin"
+    elif script_lower != "auto" and script:
+        resolved_script = script
+    else:
+        resolved_script = default_script
+
+    return resolved_lang, resolved_script
+
+
 def get_netflix_subtitle_system_prompt(
     cpl_limit: int = 42,
     max_cps: float = 20.0,
@@ -220,48 +279,75 @@ Your task is to transcribe and time subtitles from the audio with 100% verbatim 
 
 1. 100% VERBATIM ACCURACY (NEVER REPHRASE OR SUMMARIZE):
    - Transcribe the EXACT words spoken by the speaker word-for-word.
-   - NEVER rephrase, paraphrase, omit, summarize, simplify, or alter words in any way.
+   - NEVER rephrase, paraphrase, omit, summarize, simplify, smooth grammar, or alter words in any way.
    - Retain every spoken word, slang, expression, stutter, and dialogue element exactly as voiced.
    - Do NOT censor profanity.
 
-2. COMPLETE GRAMMATICAL UNITS & NATURAL CLAUSE BOUNDARIES (NO MID-PHRASE SPLITS):
+2. ABSOLUTE PROPER NOUN PRESERVATION & ANTI-ANGLICIZATION:
+   - NEVER anglicize, westernize, substitute, or translate South Asian, Indian, regional, or culturally specific names, places, or proper nouns.
+   - For example:
+     * "Tarun" must ALWAYS remain "Tarun" (or "तरुण"), NEVER substitute with Western names like "Tyrone".
+     * "Khesari" must ALWAYS remain "Khesari" (or "खेसारी"), NEVER substitute with "Casey".
+     * "Fukra" must ALWAYS remain "Fukra" (or "फुकरा").
+     * "Insaan" must ALWAYS remain "Insaan" (or "इंसान").
+   - Listen attentively to phonetic articulation. NEVER guess an English dictionary word when an Indian or regional name is spoken.
+
+3. STRICT TARGET LANGUAGE & SCRIPT PURITY:
+   - If Target Language is Hindi and Target Script is Devanagari:
+     * Transcribe 100% in Hindi using standard Devanagari script (e.g. "तरुण, क्या हाल है?").
+     * Do NOT translate Hindi dialogue into English.
+     * Do NOT output unsolicited English words unless the speaker explicitly spoke an English loanword (e.g. "डॉक्टर", "फोन", "हॉस्पिटल").
+   - If Target Language is Hindi and Target Script is Latin / Hinglish:
+     * Transcribe the spoken Hindi phonetically in Latin alphabet (e.g. "Tarun, kya haal hai? Yeh bahut achha hai.").
+     * Do NOT translate into English.
+   - If Target Language is English:
+     * Transcribe in English matching spoken speech.
+
+4. COMPLETE GRAMMATICAL UNITS & NATURAL CLAUSE BOUNDARIES (NO MID-PHRASE SPLITS):
    - Subtitle event boundaries MUST occur at natural syntactic breaks: major punctuation (., !, ?, commas, semicolons) or major coordinating conjunctions ('and then', 'but', 'so', 'because').
    - ABSOLUTE PROHIBITION: NEVER split a subtitle event in the middle of a prepositional phrase (e.g., do NOT end one subtitle with "into the wrong" and start the next with "bedroom,").
    - NEVER split a subtitle event after a title or honorific (e.g., do NOT end one subtitle with "Mrs." and start the next with "Rutherford's death?").
    - If a sentence fits within 2 lines <= {cpl_limit} characters (up to ~84 characters total), KEEP IT TOGETHER in ONE subtitle event!
-     Example:
-     Line 1: "because someone's mistaken the wrong door"
-     Line 2: "and gone through into the wrong bedroom,"
-     -> This fits in ONE subtitle event! Do NOT split across two separate subtitle events!
 
-3. PRECISE ACOUSTIC TIMING & READING SPEED (CPS):
+5. PRECISE ACOUSTIC TIMING & READING SPEED (CPS):
    - `start_time`: Must match the EXACT millisecond the speaker begins vocalizing the first syllable.
    - `end_time`: Must match the EXACT millisecond the speaker completes vocalizing the last syllable.
    - Reading speed MUST stay comfortable: maximum {max_cps} characters per second (CPS = length / duration).
    - If a sentence is long or fast, ensure it has adequate duration (at least character_count / {max_cps} seconds), or split it into two sequential complete subtitle events!
 
-4. LINE BREAKS & FORMATTING:
+6. LINE BREAKS & CLAUSE SPLITTING (HINDI & ALL LANGUAGES):
    - Maximum {cpl_limit} characters per line (CPL).
    - Maximum {max_lines} lines per subtitle event (NEVER 3 lines).
-   - Break lines at natural linguistic boundaries: punctuation, before coordinating conjunctions ('and', 'but', 'so'), or before prepositional phrases.
-   - NEVER break across: article + noun ("the / car"), pronoun + verb ("I / went"), title + name ("Mrs. / Rutherford"), or adjective + noun ("wrong / door").
+   - Break lines at natural linguistic & grammatical boundaries:
+     * English: punctuation (comma, period, semicolon), before conjunctions ('and', 'but', 'so', 'because'), or before prepositions.
+     * Hindi Devanagari: punctuation ('।', '॥', ',', '?', '!'), or before conjunctions ('और', 'या', 'लेकिन', 'मगर', 'क्योंकि', 'इसलिए', 'ताकि', 'कि', 'तो', 'जब', 'तब', 'अगर').
+     * Hinglish / Latin: before conjunctions ('aur', 'ya', 'lekin', 'kyunki', 'isliye', 'taaki', 'ki', 'to').
+   - CRITICAL HINDI POSTPOSITION RULE:
+     * Hindi postpositions ('ने', 'को', 'से', 'का', 'के', 'की', 'में', 'पर', 'पे', 'तक', 'लिए', 'साथ') MUST NEVER START A NEW LINE OR A NEW EVENT ALONE!
+     * Postpositions must ALWAYS remain on the same line as the preceding noun (e.g. 'राहुल ने' together, 'घर में' together).
+   - NEVER break across: title + name ('श्री' / 'श्रीमती' / 'डॉ.' + name, 'Mr.' / 'Mrs.' + name), article + noun, pronoun + verb, or split compound verb phrases.
 
-5. SPEAKER SEPARATION & DUAL SPEAKER FORMAT:
-   - Identify different speakers from voice timbre, pitch, gender, acoustics, and conversational context.
-   - When different speakers converse (e.g. phone call, interview, dialogue):
-     Option A (Preferred): Create SEPARATE sequential subtitle events for each speaker whenever there is a natural conversational turn, so each speaker has their own event with accurate onset/offset.
-     Option B (Rapid dialogue in same event): If two speakers converse in the same subtitle event, EACH line MUST start with a hyphen and space (`- `):
-       `- Hello, Denise, it's Alice Warbrick.\\n- Hi, yeah, you okay?`
-     - NEVER mix two different speakers' words onto the same line without hyphens!
-   - Populate the "speakers" array with the speaker name or label.
+7. STRICT SINGLE-SPEAKER RULE (EXACTLY ONE SPEAKER PER EVENT):
+   - Identify speaker changes accurately from voice acoustics, timbre, pitch, gender, and conversational turns.
+   - Every single subtitle event MUST belong to EXACTLY ONE speaker!
+   - NEVER combine dialogue from two or more speakers into a single subtitle event.
+   - NEVER use dual-speaker hyphen format ('- Speaker 1\\n- Speaker 2') in a single subtitle event.
+   - Whenever the speaker changes, you MUST output a NEW SEPARATE subtitle event with its own start_time and end_time.
+   - The 'speakers' array for each event MUST contain exactly ONE speaker identity (e.g. ['Speaker 1'] or ['Speaker 2']).
 
-6. ITALICS (<i>...</i>):
+8. SEQUENTIAL TIMELINE & ZERO OVERLAPS:
+   - All subtitle events MUST be strictly sequential on the timeline.
+   - Subtitles must NEVER overlap on the timeline (start of next subtitle must always be >= end of previous subtitle + 2 frames).
+   - Even when speakers speak quickly or back-to-back, sequence the subtitle events non-overlappingly with clear start and end times.
+   - Transcribe 100% of spoken words verbatim from all speakers without dropping or altering anything.
+
+9. ITALICS (<i>...</i>):
    - Use `<i>...</i>` for: voiceover narration, off-screen dialogue, phone/radio/TV audio, and song lyrics (`<i>♪ lyrics here ♪</i>`).
 
-7. SOUND DESCRIPTIONS (SDH Mode):
+10. SOUND DESCRIPTIONS (SDH Mode):
    - If SDH is requested, include audible sound events in lowercase brackets: `[door slams]`, `[music playing]`, `[laughter]`.
 
-8. PUNCTUATION & SPECIAL FORMATTING:
+11. PUNCTUATION & SPECIAL FORMATTING:
    - Use Unicode ellipsis `…` (U+2026), NOT three periods `...`.
    - Use double hyphen `--` for sudden speech interruptions or trailing off.
    - Numbers 1-10 spelled out in words, 11+ written as numerals.
@@ -269,8 +355,8 @@ Your task is to transcribe and time subtitles from the audio with 100% verbatim 
 ### OUTPUT FORMAT:
 Return a structured JSON object strictly matching this schema:
 {{
-  "detected_language": "string (e.g. English, Hindi, Spanish)",
-  "detected_script": "string (e.g. Latin, Devanagari)",
+  "detected_language": "string (e.g. Hindi, English, Spanish)",
+  "detected_script": "string (e.g. Devanagari, Latin, Latin (Hinglish))",
   "subtitles": [
     {{
       "id": 1,
@@ -297,15 +383,39 @@ def get_gemini_client(api_key: Optional[str] = None) -> genai.Client:
     return genai.Client(api_key=key)
 
 
-def repair_chunk_timestamp(ts_val: Any, chunk_dur: float) -> float:
-    """Safely parse and clamp timestamp relative to audio chunk duration, fixing any broadcast minute hallucinations."""
+def resolve_chunk_timestamp(ts_val: Any, chunk_s: float, chunk_e: float) -> float:
+    """
+    Accurately maps Gemini timestamp to video timeline without modulo-60 distortion.
+    Handles both chunk-relative timestamps (0.0 to chunk_dur) and absolute timestamps.
+    """
     from app.audio_processor import parse_timestamp
     sec = parse_timestamp(ts_val) if isinstance(ts_val, str) else float(ts_val)
-    if sec > chunk_dur + 1.0:
-        # Gemini added hallucinated broadcast minutes: take modulo 60 to recover true slice second
-        sec = sec % 60.0
-        if sec > chunk_dur:
-            sec = min(chunk_dur - 0.5, max(0.0, sec % chunk_dur))
+    chunk_dur = max(0.01, chunk_e - chunk_s)
+
+    # 1. Check if Gemini already outputted an absolute timestamp on the video timeline
+    if chunk_s > 5.0 and (chunk_s - 2.0 <= sec <= chunk_e + 15.0):
+        # Already absolute!
+        return round(max(chunk_s, min(chunk_e, sec)), 3)
+
+    # 2. Check if timestamp is chunk-relative within normal chunk duration
+    if 0.0 <= sec <= chunk_dur + 2.0:
+        return round(chunk_s + min(chunk_dur, sec), 3)
+
+    # 3. Fallback if Gemini hallucinated broadcast minute (e.g. 01:00:15 instead of 00:00:15 in a slice)
+    # Never modulo 60 blindly! Check if removing an offset fits nicely within chunk_dur
+    if sec > chunk_dur:
+        shifted = sec % chunk_dur
+        return round(chunk_s + shifted, 3)
+
+    return round(chunk_s + max(0.0, sec), 3)
+
+
+def repair_chunk_timestamp(ts_val: Any, chunk_dur: float) -> float:
+    """Safely parse timestamp relative to audio chunk duration without modulo-60 distortion."""
+    from app.audio_processor import parse_timestamp
+    sec = parse_timestamp(ts_val) if isinstance(ts_val, str) else float(ts_val)
+    if sec > chunk_dur:
+        sec = min(chunk_dur, max(0.0, sec % chunk_dur if chunk_dur > 0 else 0.0))
     return round(max(0.0, sec), 3)
 
 
@@ -333,11 +443,24 @@ def balance_text_to_lines(text: str, cpl_limit: int = 42, max_lines: int = 2) ->
         'a', 'an', 'the', 'mr.', 'mrs.', 'ms.', 'dr.', 'prof.', 'mr', 'mrs', 'ms', 'dr',
         'my', 'his', 'her', 'our', 'their', 'its', 'your', 'this', 'that', 'these', 'those',
         'wrong', 'other', 'new', 'old', 'into', 'of', 'to', 'in', 'at', 'from', 'with',
-        'i', 'he', 'she', 'we', 'they', 'it'
+        'i', 'he', 'she', 'we', 'they', 'it',
+        # Hindi titles & honorifics - never sever from name
+        'श्री', 'श्रीमती', 'सुश्री', 'डॉक्टर', 'डॉ.', 'डॉ', 'पंडित', 'पं.', 'पं', 'shri', 'smt', 'pandit'
+    }
+    bad_starts = {
+        # Hindi postpositions - must NEVER start line 2 alone!
+        'ने', 'को', 'से', 'का', 'के', 'की', 'में', 'पर', 'पे', 'तक', 'लिए', 'साथ', 'द्वारा', 'वाला', 'वाले', 'वाली',
+        'ne', 'ko', 'se', 'ka', 'ke', 'ki', 'mein', 'me', 'par', 'pe', 'tak', 'liye', 'saath', 'dwara', 'wala', 'wale', 'wali',
+        # Hindi auxiliaries when severed
+        'है', 'हैं', 'था', 'थी', 'थे', 'होगा', 'होगी', 'होंगे', 'रहा', 'रही', 'रहे',
+        'hai', 'hain', 'tha', 'thi', 'the', 'hoga', 'hogi', 'honge', 'raha', 'rahi', 'rahe'
     }
     prepositions_and_conjunctions = {
         'and', 'but', 'or', 'so', 'because', 'although', 'while', 'when', 'if',
-        'through', 'into', 'under', 'between', 'after', 'before', 'about', 'over', 'by', 'from', 'with'
+        'through', 'into', 'under', 'between', 'after', 'before', 'about', 'over', 'by', 'from', 'with',
+        # Hindi conjunctions
+        'और', 'या', 'अथवा', 'लेकिन', 'मगर', 'किंतु', 'परंतु', 'क्योंकि', 'इसलिए', 'ताकि', 'कि', 'तो', 'जब', 'तब', 'अगर', 'यदि', 'जैसे', 'वैसे', 'फिर', 'भी',
+        'aur', 'ya', 'athwa', 'lekin', 'magar', 'kintu', 'parantu', 'kyunki', 'isliye', 'taaki', 'ki', 'to', 'jab', 'tab', 'agar', 'yadi', 'jaise', 'phir', 'bhi'
     }
 
     for i in range(1, len(words)):
@@ -347,16 +470,19 @@ def balance_text_to_lines(text: str, cpl_limit: int = 42, max_lines: int = 2) ->
             diff = abs(len(l1) - len(l2))
             penalty = diff * 0.4  # Lower weight on raw visual difference
 
-            last_w = words[i - 1].lower().rstrip('.,!?:;--…')
-            first_w = words[i].lower().rstrip('.,!?:;--…')
+            last_w = words[i - 1].lower().rstrip('.,!?:;--…।॥')
+            first_w = words[i].lower().rstrip('.,!?:;--…।॥')
 
             if last_w in bad_ends:
                 penalty += 1000  # Strictly forbid breaking after articles, titles, adjectives, pronouns
 
-            if l1.endswith((',', ';', '.', '!', '?', '--', '…', ':')):
-                penalty -= 40   # Strongest preference for natural punctuation breaks
+            if first_w in bad_starts:
+                penalty += 1500  # Strictly forbid starting line 2 with a postposition or severed auxiliary!
+
+            if l1.endswith((',', ';', '.', '!', '?', '--', '…', ':', '।', '॥')):
+                penalty -= 45   # Strongest preference for natural punctuation breaks (including Hindi । and ॥)
             elif first_w in prepositions_and_conjunctions:
-                penalty -= 25   # Strong preference for breaking before prepositions and conjunctions
+                penalty -= 30   # Strong preference for breaking before prepositions and conjunctions
 
             if penalty < min_penalty:
                 min_penalty = penalty
@@ -386,12 +512,27 @@ def heal_cross_event_dangling_phrases(events: List[Dict[str, Any]], cpl_limit: i
 
         last_w = cur_words[-1].lower().rstrip('.,!?:;--…')
 
-        # Case 1: cur ends with a title like "Mrs." -> shift "Mrs." to next event so title stays with name
-        if last_w in {'mr.', 'mrs.', 'ms.', 'dr.', 'prof.', 'mr', 'mrs', 'ms', 'dr'}:
+        # Case 1: cur ends with a title -> shift title to next event so title stays with name
+        if last_w in {'mr.', 'mrs.', 'ms.', 'dr.', 'prof.', 'mr', 'mrs', 'ms', 'dr',
+                       'श्री', 'श्रीमती', 'सुश्री', 'डॉक्टर', 'डॉ.', 'डॉ', 'पंडित', 'पं.', 'पं', 'shri', 'smt', 'pandit'}:
             title_word = cur_words.pop()
             nxt_words.insert(0, title_word)
             cur['text'] = ' '.join(cur_words)
             nxt['text'] = ' '.join(nxt_words)
+
+        # Case 1B: nxt starts with a Hindi postposition -> shift it to cur so it stays with the noun
+        elif nxt_words[0].lower().rstrip('.,!?:;--…।॥') in {
+            'ने', 'को', 'से', 'का', 'के', 'की', 'में', 'पर', 'पे', 'तक', 'लिए', 'साथ', 'द्वारा',
+            'ne', 'ko', 'se', 'ka', 'ke', 'ki', 'mein', 'me', 'par', 'pe', 'tak', 'liye', 'saath'
+        }:
+            postp = nxt_words.pop(0)
+            cand_cur = ' '.join(cur_words + [postp])
+            lines = balance_text_to_lines(cand_cur, cpl_limit=cpl_limit, max_lines=max_lines)
+            if lines:
+                cur['text'] = '\n'.join(lines)
+                nxt['text'] = ' '.join(nxt_words)
+            else:
+                nxt_words.insert(0, postp)
 
         # Case 2: cur ends with an article/adjective/preposition like "wrong" or "the" and nxt has the noun
         elif last_w in bad_ends:
@@ -438,10 +579,16 @@ def split_and_balance_event(ev: Dict[str, Any], cpl_limit: int = 42, max_lines: 
         cum += len(words[i - 1])
         pen = abs(cum - target_mid)
         prev_w = words[i - 1]
-        if prev_w.endswith((',', ';', '.', '!', '?', '--', '…')):
+        next_w = words[i].lower().rstrip('.,!?:;--…।॥')
+        if prev_w.endswith((',', ';', '.', '!', '?', '--', '…', ':', '।', '॥')):
+            pen -= 35
+        elif next_w in ['and', 'but', 'or', 'so', 'that', 'who', 'which', 'because', 'when', 'if',
+                        'और', 'या', 'अथवा', 'लेकिन', 'मगर', 'किंतु', 'परंतु', 'क्योंकि', 'इसलिए', 'ताकि', 'कि', 'तो', 'जब', 'तब', 'अगर', 'यदि',
+                        'aur', 'ya', 'lekin', 'kyunki', 'isliye', 'taaki', 'agar']:
             pen -= 25
-        elif words[i].lower() in ['and', 'but', 'or', 'so', 'that', 'who', 'which', 'because', 'when', 'if']:
-            pen -= 15
+        elif next_w in {'ने', 'को', 'से', 'का', 'के', 'की', 'में', 'पर', 'पे', 'तक', 'लिए', 'साथ',
+                        'ne', 'ko', 'se', 'ka', 'ke', 'ki', 'mein', 'me', 'par', 'pe', 'tak'}:
+            pen += 1500  # Strictly avoid severing noun and postposition across events!
         if pen < best_pen:
             best_pen = pen
             best_split = i
@@ -540,7 +687,11 @@ def polish_subtitle_events_netflix(
     - Replaces ascii '...' with Unicode ellipsis '…'.
     """
     from app.netflix_models import format_timestamp, calculate_cps, calculate_cpl
+    from app.netflix_linter import split_multi_speaker_subtitles
     min_gap_sec = round(2.0 / frame_rate, 3)
+
+    # Step 0: Ensure strict single-speaker events (never 2 speakers in 1 subtitle)
+    events = split_multi_speaker_subtitles(events, frame_rate=frame_rate, min_duration=min_duration)
     
     # Step 1: Split and balance any oversized subtitles (NO WORDS DROPPED)
     expanded_events = []
@@ -557,7 +708,7 @@ def polish_subtitle_events_netflix(
         et = float(ev.get("end_time", st + 1.5))
         dur = max(0.01, round(et - st, 3))
         
-        # 1. Min duration guard
+        # 1. Min duration guard (strictly respecting next event start)
         if dur < min_duration:
             next_st = float(expanded_events[idx + 1]["start_time"]) if idx + 1 < n else et + 2.0
             max_allowed_et = next_st - min_gap_sec
@@ -609,7 +760,7 @@ def polish_subtitle_events_netflix(
         ev["start_time"] = st
         ev["end_time"] = et
 
-    # Step 3: Final Dedicated Gap Enforcement Pass
+    # Step 3: Final Dedicated Gap Enforcement Pass (Strict Non-Overlapping Order)
     for i in range(len(expanded_events) - 1):
         cur = expanded_events[i]
         nxt = expanded_events[i + 1]
@@ -645,7 +796,7 @@ def polish_subtitle_events_netflix(
             cur["end"] = cur_et
             cur["duration"] = max(0.01, round(cur_et - cur_st, 3))
 
-        # Guarantee minimum duration
+        # Guarantee minimum duration (strictly sequential)
         if cur_et - cur_st < min_duration:
             needed = min_duration - (cur_et - cur_st)
             avail_post = (nxt_st - min_gap_sec) - cur_et
@@ -662,10 +813,12 @@ def polish_subtitle_events_netflix(
             cur["end"] = cur_et
             cur["duration"] = max(0.01, round(cur_et - cur_st, 3))
 
-    # Absolute final guarantee against overlaps and max_duration violations
+    # Final guarantee for strictly non-overlapping sequential events
     for i in range(len(expanded_events) - 1):
-        if expanded_events[i]["end_time"] > expanded_events[i + 1]["start_time"] - min_gap_sec:
-            expanded_events[i]["end_time"] = round(expanded_events[i + 1]["start_time"] - min_gap_sec, 3)
+        nxt_st = expanded_events[i + 1]["start_time"]
+        cur_et = expanded_events[i]["end_time"]
+        if cur_et > nxt_st - min_gap_sec:
+            expanded_events[i]["end_time"] = round(nxt_st - min_gap_sec, 3)
             if expanded_events[i]["end_time"] - expanded_events[i]["start_time"] < min_duration:
                 prev_e = expanded_events[i - 1]["end_time"] if i > 0 else 0.0
                 expanded_events[i]["start_time"] = max(prev_e + min_gap_sec if i > 0 else 0.0, round(expanded_events[i]["end_time"] - min_duration, 3))
@@ -684,19 +837,22 @@ def polish_subtitle_events_netflix(
         ev["start_time_str"] = format_timestamp(st)
         ev["end_time_str"] = format_timestamp(et)
         ev["duration"] = dur
-        # Ensure dual-speaker dialogue is properly hyphenated on both lines (Netflix rule)
-        lines = [l.strip() for l in ev["text"].split("\n") if l.strip()]
-        if len(lines) == 2 and (any(l.startswith("-") for l in lines) or len(ev.get("speakers", [])) > 1):
-            l1 = lines[0]
-            l2 = lines[1]
-            if not l1.startswith("-"):
-                l1 = f"- {l1}"
-            if not l2.startswith("-"):
-                l2 = f"- {l2}"
-            ev["text"] = f"{l1}\n{l2}"
-            lines = [l1, l2]
-            ev["speaker_count"] = 2
-        ev["lines"] = lines
+
+        # Guarantee EXACTLY ONE speaker per subtitle event (strip any leading dialogue dashes)
+        clean_text = ev["text"]
+        lines = [l.strip() for l in clean_text.split("\n") if l.strip()]
+        unhyphenated_lines = []
+        for l in lines:
+            if l.startswith(("- ", "— ", "– ")):
+                unhyphenated_lines.append(l[2:].strip())
+            elif l.startswith(("-", "—", "–")):
+                unhyphenated_lines.append(l[1:].strip())
+            else:
+                unhyphenated_lines.append(l)
+        ev["text"] = "\n".join(unhyphenated_lines)
+        ev["lines"] = unhyphenated_lines
+        ev["speakers"] = [(ev.get("speakers") or ["Speaker 1"])[0]]
+        ev["speaker_count"] = 1
         ev["cpl"] = calculate_cpl(ev["text"])
         ev["qc_errors"] = []
         ev["is_valid"] = True
@@ -884,7 +1040,8 @@ def build_qc_result(
 
 def generate_subtitles(
     video_path: str,
-    language: str = "en",
+    language: str = "auto",
+    script: str = "auto",
     content_type: str = "adult",
     sdh_mode: bool = False,
     progress_callback = None,
@@ -896,8 +1053,9 @@ def generate_subtitles(
     gemini_auto_fix: bool = True
 ) -> dict:
     """Synchronous / Threaded end-to-end pipeline for Netflix subtitle generation with dynamic settings."""
+    resolved_language, resolved_script = normalize_language_and_script(language, script)
     log_terminal(f"Starting subtitle generation for: {Path(video_path).name}")
-    log_terminal(f"Parameters: Language={language}, Content={content_type}, SDH={sdh_mode}, CPL<={cpl_limit}, CPS<={max_cps}, AutoFix={gemini_auto_fix}")
+    log_terminal(f"Parameters: Language={resolved_language}, Script={resolved_script}, Content={content_type}, SDH={sdh_mode}, CPL<={cpl_limit}, CPS<={max_cps}, AutoFix={gemini_auto_fix}")
     
     if progress_callback:
         progress_callback("Extracting Audio", 10, "Extracting audio track from video...")
@@ -925,22 +1083,20 @@ def generate_subtitles(
     is_dual_channel = dual_ch_info.get("is_dual_channel", False)
     
     # 6. Run Whisper on audio for word-level timestamps
-    # For audio <= 180s (3 minutes), run Whisper on full audio upfront (fast, 2-4s)
-    # For long audio (> 180s, e.g. 40 minutes), run Whisper per-chunk on the 50s slice inside each batch loop
     whisper_words = []
     if total_duration <= 180.0:
         if progress_callback:
             progress_callback("Whisper Alignment", 20, "Extracting word-level timestamps with Whisper...")
         log_terminal("Running Whisper for precise timestamp extraction...")
         try:
-            whisper_words = get_whisper_word_timestamps(audio_path_out, language=language)
+            whisper_words = get_whisper_word_timestamps(audio_path_out, language=resolved_language)
             log_terminal(f"Whisper produced {len(whisper_words)} word timestamps for alignment.")
         except Exception as e:
             log_terminal(f"WARNING: Whisper failed ({e}), will use Gemini timestamps as fallback.")
     
-    # 7. Chunk long audio at dialogue boundaries
-    if total_duration > 65.0:
-        chunks = find_dialogue_split_points(audio_path_out, target_chunk_sec=50.0, min_chunk_sec=35.0, max_chunk_sec=75.0)
+    # 7. Chunk long audio: 180s target chunks (3 minutes) preserves full conversational context
+    if total_duration > 75.0:
+        chunks = find_dialogue_split_points(audio_path_out, target_chunk_sec=180.0, min_chunk_sec=120.0, max_chunk_sec=240.0)
     else:
         chunks = [(0.0, total_duration)]
         
@@ -961,8 +1117,7 @@ def generate_subtitles(
             
     raw_subtitles = []
     video_id = str(uuid.uuid4())[:8]
-    resolved_language = language
-    resolved_script = "Auto-Detect"
+    rolling_context = []
     
     for chunk_idx, (chunk_s, chunk_e) in enumerate(chunks, 1):
         log_terminal(f"Processing Chunk {chunk_idx}/{len(chunks)} [{chunk_s:.2f}s -> {chunk_e:.2f}s] with Gemini AI...")
@@ -981,28 +1136,37 @@ def generate_subtitles(
                 chunk_bytes = f.read()
             audio_part = types.Part.from_bytes(data=chunk_bytes, mime_type="audio/wav")
 
+            context_clause = ""
+            if rolling_context:
+                formatted_prev = "\n".join([f"- {item}" for item in rolling_context[-5:]])
+                context_clause = (
+                    f"PREVIOUS CONVERSATION CONTEXT (from previous minutes for conversational continuity, speaker identity & proper nouns — DO NOT re-transcribe):\n"
+                    f"{formatted_prev}\n\n"
+                )
+
             script_clause = f"Target Script: {resolved_script}\n" if resolved_script != "Auto-Detect" else ""
             prompt = (
-                f"Target Language: {resolved_language}\n"
+                f"{context_clause}"
+                f"Target Spoken Language: {resolved_language}\n"
                 f"{script_clause}"
                 f"SDH Mode: {sdh_mode}\n"
                 f"Content Type: {content_type}\n"
                 f"MANDATORY FORMATTING & TIMING SPECIFICATIONS:\n"
-                f"1. MAXIMUM CHARACTERS PER LINE (CPL): Exactly <= {cpl_limit} characters per line.\n"
-                f"   - When a sentence exceeds {cpl_limit - 4} characters, insert a newline ('\\n') at a natural linguistic pause (commas, before conjunctions 'and', 'but', or prepositions).\n"
-                f"   - NEVER break in the middle of a person's name or between an article and noun.\n"
-                f"2. MAXIMUM READING SPEED (CPS): Exactly <= {max_cps} characters per second (CPS = length / duration).\n"
-                f"   - Split long, rapid, or dense dialogue into sequential subtitle events so that NO subtitle event ever exceeds {max_cps} CPS!\n"
-                f"3. MAXIMUM LINES: Exactly <= {max_lines} lines per subtitle event.\n"
-                f"4. 100% VERBATIM ACCURACY: Transcribe the EXACT spoken words word-for-word. NEVER summarize, paraphrase, simplify, omit, or alter dialogue in any way.\n"
-                f"5. COMPLETE CLAUSES & SYNTACTIC BOUNDARIES:\n"
-                f"   - Subtitle events MUST break at natural clause boundaries (commas, periods, semicolons, 'and then', 'so', 'but').\n"
-                f"   - NEVER split in the middle of a prepositional phrase ('into the wrong / bedroom') or title ('Mrs. / Rutherford').\n"
-                f"   - If a sentence fits within 2 lines of {cpl_limit} characters (<= 84 characters total), KEEP IT TOGETHER in ONE subtitle event.\n"
-                f"6. SPEAKER SEPARATION & DUAL SPEAKER FORMATTING:\n"
-                f"   - ALWAYS separate different speakers! Identify speaker changes from voice timbre, pitch, gender, and conversational turns.\n"
-                f"   - If different speakers converse, give each speaker their own subtitle event OR format dual-speaker lines with leading hyphens: '- Speaker 1\\n- Speaker 2'.\n"
-                f"7. TIMESTAMPS: Provide acoustic start_time and end_time for each subtitle event relative to this audio slice."
+                f"1. 100% VERBATIM ACCURACY: Transcribe the EXACT words spoken by the speaker word-for-word. NEVER summarize, paraphrase, simplify, omit, smooth grammar, or alter dialogue in any way.\n"
+                f"2. ABSOLUTE PROPER NOUN PRESERVATION & ANTI-ANGLICIZATION:\n"
+                f"   - NEVER anglicize, westernize, or substitute South Asian, Indian, regional, or culturally specific names, places, or titles (e.g. 'Tarun' must ALWAYS remain 'Tarun' or 'तरुण', NEVER replace with Western names like 'Tyrone').\n"
+                f"   - Transcribe names with phonetic fidelity.\n"
+                f"3. STRICT LANGUAGE & SCRIPT PURITY:\n"
+                f"   - If Target Language is Hindi and Script is Devanagari: Output 100% in Hindi using standard Devanagari script. Do NOT translate into English!\n"
+                f"   - If Target Language is Hindi and Script is Latin (Hinglish): Output conversational Hindi in the Latin alphabet (e.g. 'Tarun, kya haal hai?'). Do NOT translate into English!\n"
+                f"   - If Target Language is English: Output in English.\n"
+                f"4. MAXIMUM CHARACTERS PER LINE (CPL): Exactly <= {cpl_limit} characters per line.\n"
+                f"   - When a sentence exceeds {cpl_limit - 4} characters, insert a newline ('\\n') at a natural linguistic pause.\n"
+                f"5. MAXIMUM READING SPEED (CPS): Exactly <= {max_cps} characters per second (CPS = length / duration).\n"
+                f"6. MAXIMUM LINES: Exactly <= {max_lines} lines per subtitle event.\n"
+                f"7. COMPLETE CLAUSES & SYNTACTIC BOUNDARIES: Subtitle events MUST break at natural clause boundaries.\n"
+                f"8. SPEAKER SEPARATION & DUAL SPEAKER FORMATTING: Separate different speakers cleanly.\n"
+                f"9. TIMESTAMPS: Provide acoustic start_time and end_time for each subtitle event relative to this audio slice."
             )
             
             response = None
@@ -1063,12 +1227,11 @@ def generate_subtitles(
             if isinstance(parsed, list):
                 subs = parsed
                 
-            chunk_dur = chunk_e - chunk_s
             for s in subs:
                 st_val = s.get("start_time", 0.0)
                 et_val = s.get("end_time", 2.0)
-                s_sec = repair_chunk_timestamp(st_val, chunk_dur) + chunk_s
-                e_sec = repair_chunk_timestamp(et_val, chunk_dur) + chunk_s
+                s_sec = resolve_chunk_timestamp(st_val, chunk_s, chunk_e)
+                e_sec = resolve_chunk_timestamp(et_val, chunk_s, chunk_e)
                 if e_sec <= s_sec:
                     e_sec = round(s_sec + 1.5, 3)
                 raw_subtitles.append({
@@ -1082,8 +1245,17 @@ def generate_subtitles(
                     "is_italic": bool(s.get("is_italic", False)),
                     "is_forced_narrative": bool(s.get("is_forced_narrative", False))
                 })
+            
+            # Update rolling context for next chunk
+            for item in raw_subtitles[-5:]:
+                txt = item.get("text", "").replace("\n", " ").strip()
+                spk = (item.get("speakers") or ["Speaker"])[0]
+                if txt:
+                    rolling_context.append(f"{spk}: \"{txt}\"")
+            if len(rolling_context) > 10:
+                rolling_context = rolling_context[-10:]
                     
-            # For long audio (> 180s), extract Whisper words on this 50s slice
+            # For long audio (> 180s), extract Whisper words on this slice with resolved language
             if total_duration > 180.0 and len(chunks) > 1:
                 try:
                     cw = get_whisper_word_timestamps(target_path, language=resolved_language)
@@ -1101,6 +1273,10 @@ def generate_subtitles(
                 except Exception:
                     pass
                 
+    # Stage 0: Guarantee single speaker per event (split any multi-speaker events)
+    from app.netflix_linter import split_multi_speaker_subtitles
+    raw_subtitles = split_multi_speaker_subtitles(raw_subtitles, frame_rate=frame_rate, min_duration=min_duration)
+
     # Stage 1A: Heal any cross-event dangling phrases (e.g. 'the wrong' | 'bedroom' or 'Mrs.' | 'Rutherford')
     raw_subtitles = heal_cross_event_dangling_phrases(raw_subtitles, cpl_limit=cpl_limit, max_lines=max_lines)
 
@@ -1156,7 +1332,8 @@ def generate_subtitles(
 
 async def generate_subtitles_stream(
     video_path: str,
-    language: str = "en",
+    language: str = "auto",
+    script: str = "auto",
     content_type: str = "adult",
     sdh_mode: bool = False,
     cpl_limit: int = 42,
@@ -1167,8 +1344,9 @@ async def generate_subtitles_stream(
     gemini_auto_fix: bool = True
 ) -> AsyncGenerator[str, None]:
     """Progressive Batch-wise SSE Stream generator for real-time progressive ingestion with dynamic settings."""
+    resolved_language, resolved_script = normalize_language_and_script(language, script)
     log_terminal(f"Starting Progressive Batch Stream for: {Path(video_path).name}")
-    log_terminal(f"Settings: Language={language}, Content={content_type}, SDH={sdh_mode}, CPL<={cpl_limit}, CPS<={max_cps}, AutoFix={gemini_auto_fix}")
+    log_terminal(f"Settings: Language={resolved_language}, Script={resolved_script}, Content={content_type}, SDH={sdh_mode}, CPL<={cpl_limit}, CPS<={max_cps}, AutoFix={gemini_auto_fix}")
     
     # 1. Extract audio
     audio_info = await asyncio.to_thread(extract_audio_from_video, video_path)
@@ -1191,21 +1369,20 @@ async def generate_subtitles_stream(
     
     # 3. Run Whisper on audio for word-level timestamps
     # For audio <= 180s (3 minutes), run Whisper on full audio upfront (fast, 2-4s)
-    # For long audio (> 180s, e.g. 40 minutes), DO NOT block upfront!
-    # Instead, run Whisper per-chunk on each 50s slice inside each batch loop
     whisper_words = []
     if total_duration <= 180.0:
         log_terminal("Running Whisper for precise timestamp extraction...")
         yield f"data: {json.dumps({'type': 'progress', 'chunk_index': 0, 'total_chunks': 0, 'stage': 'Extracting word-level timestamps with Whisper...'})}\n\n"
         try:
-            whisper_words = await asyncio.to_thread(get_whisper_word_timestamps, audio_path_out, language)
+            whisper_words = await asyncio.to_thread(get_whisper_word_timestamps, audio_path_out, resolved_language)
             log_terminal(f"Whisper produced {len(whisper_words)} word timestamps for alignment.")
         except Exception as e:
             log_terminal(f"WARNING: Whisper failed ({e}), will use Gemini timestamps as fallback.")
     
-    # 4. Chunk long audio
-    if total_duration > 65.0:
-        chunks = find_dialogue_split_points(audio_path_out, target_chunk_sec=50.0, min_chunk_sec=35.0, max_chunk_sec=75.0)
+    # 4. Chunk long audio: 180s target chunks (3 minutes) instead of 50s!
+    # A 47-minute file will now be ~15 natural batches with rich conversational context instead of 54 fragmented slices!
+    if total_duration > 75.0:
+        chunks = find_dialogue_split_points(audio_path_out, target_chunk_sec=180.0, min_chunk_sec=120.0, max_chunk_sec=240.0)
     else:
         chunks = [(0.0, total_duration)]
         
@@ -1234,8 +1411,7 @@ async def generate_subtitles_stream(
     all_aligned_subtitles = []
     prev_batch_end = 0.0
     current_event_id = 1
-    resolved_language = language
-    resolved_script = "Auto-Detect"
+    rolling_context = []
     
     # Process each batch
     for chunk_idx, (chunk_s, chunk_e) in enumerate(chunks, 1):
@@ -1251,7 +1427,7 @@ async def generate_subtitles_stream(
         else:
             target_path = audio_path_out
 
-        # For long audio (> 180s), run Whisper specifically on this 50s slice
+        # For long audio (> 180s), run Whisper specifically on this slice
         chunk_whisper_words = []
         if total_duration > 180.0 and total_chunks > 1:
             try:
@@ -1267,33 +1443,56 @@ async def generate_subtitles_stream(
                 log_terminal(f"Batch {chunk_idx} Whisper alignment warning: {e}")
             
         try:
-            # Read chunk audio bytes directly (under 3MB, well within 20MB inline limit)
+            # Read chunk audio bytes directly (under 12MB for 3 min, well within 20MB inline limit)
             with open(target_path, "rb") as f:
                 chunk_bytes = f.read()
             audio_part = types.Part.from_bytes(data=chunk_bytes, mime_type="audio/wav")
 
+            context_clause = ""
+            if rolling_context:
+                formatted_prev = "\n".join([f"- {item}" for item in rolling_context[-5:]])
+                context_clause = (
+                    f"PREVIOUS CONVERSATION CONTEXT (from previous minutes for continuity & speaker/term consistency — DO NOT re-transcribe):\n"
+                    f"{formatted_prev}\n\n"
+                )
+
             script_clause = f"Target Script: {resolved_script}\n" if resolved_script != "Auto-Detect" else ""
             prompt = (
-                f"Target Language: {resolved_language}\n"
+                f"{context_clause}"
+                f"Target Spoken Language: {resolved_language}\n"
                 f"{script_clause}"
                 f"SDH Mode: {sdh_mode}\n"
                 f"Content Type: {content_type}\n"
                 f"MANDATORY FORMATTING & TIMING SPECIFICATIONS:\n"
-                f"1. MAXIMUM CHARACTERS PER LINE (CPL): Exactly <= {cpl_limit} characters per line.\n"
-                f"   - When a sentence exceeds {cpl_limit - 4} characters, insert a newline ('\\n') at a natural linguistic pause (commas, before conjunctions 'and', 'but', or prepositions).\n"
-                f"   - NEVER break in the middle of a person's name or between an article and noun.\n"
-                f"2. MAXIMUM READING SPEED (CPS): Exactly <= {max_cps} characters per second (CPS = length / duration).\n"
+                f"1. 100% VERBATIM ACCURACY: Transcribe the EXACT words spoken by the speaker word-for-word. NEVER summarize, paraphrase, simplify, omit, smooth grammar, or alter dialogue in any way.\n"
+                f"2. ABSOLUTE PROPER NOUN PRESERVATION & ANTI-ANGLICIZATION:\n"
+                f"   - NEVER anglicize, westernize, or substitute South Asian, Indian, regional, or culturally specific names, places, or titles (e.g. 'Tarun' must ALWAYS remain 'Tarun' or 'तरुण', NEVER replace with Western names like 'Tyrone').\n"
+                f"   - Transcribe names with phonetic fidelity.\n"
+                f"3. STRICT LANGUAGE & SCRIPT PURITY:\n"
+                f"   - If Target Language is Hindi and Script is Devanagari: Output 100% in Hindi using standard Devanagari script. Do NOT translate into English!\n"
+                f"   - If Target Language is Hindi and Script is Latin (Hinglish): Output conversational Hindi in the Latin alphabet (e.g. 'Tarun, kya haal hai?'). Do NOT translate into English!\n"
+                f"   - If Target Language is English: Output in English.\n"
+                f"4. MAXIMUM CHARACTERS PER LINE (CPL): Exactly <= {cpl_limit} characters per line.\n"
+                f"   - When a sentence exceeds {cpl_limit - 4} characters, insert a newline ('\\n') at a natural linguistic pause.\n"
+                f"   - HINDI & ALL LANGUAGES: Break at punctuation ('।', '॥', ',', '?') or before conjunctions ('और', 'या', 'लेकिन', 'मगर', 'क्योंकि', 'इसलिए', 'ताकि', 'कि', 'तो', 'and', 'but').\n"
+                f"   - CRITICAL HINDI RULE: NEVER break right before a Hindi postposition ('ने', 'को', 'से', 'का', 'के', 'की', 'में', 'पर', 'पे', 'तक') leaving it stranded on the next line! Keep postpositions with the preceding noun.\n"
+                f"   - NEVER break in the middle of a person's name or title ('श्री', 'श्रीमती', 'डॉ.', 'Mr.', 'Mrs.').\n"
+                f"5. MAXIMUM READING SPEED (CPS): Exactly <= {max_cps} characters per second (CPS = length / duration).\n"
                 f"   - Split long, rapid, or dense dialogue into sequential subtitle events so that NO subtitle event ever exceeds {max_cps} CPS!\n"
-                f"3. MAXIMUM LINES: Exactly <= {max_lines} lines per subtitle event.\n"
-                f"4. 100% VERBATIM ACCURACY: Transcribe the EXACT spoken words word-for-word. NEVER summarize, paraphrase, simplify, omit, or alter dialogue in any way.\n"
-                f"5. COMPLETE CLAUSES & SYNTACTIC BOUNDARIES:\n"
-                f"   - Subtitle events MUST break at natural clause boundaries (commas, periods, semicolons, 'and then', 'so', 'but').\n"
-                f"   - NEVER split in the middle of a prepositional phrase ('into the wrong / bedroom') or title ('Mrs. / Rutherford').\n"
+                f"6. MAXIMUM LINES: Exactly <= {max_lines} lines per subtitle event.\n"
+                f"7. COMPLETE CLAUSES & SYNTACTIC BOUNDARIES:\n"
+                f"   - Subtitle events MUST break at natural clause boundaries.\n"
                 f"   - If a sentence fits within 2 lines of {cpl_limit} characters (<= 84 characters total), KEEP IT TOGETHER in ONE subtitle event.\n"
-                f"6. SPEAKER SEPARATION & DUAL SPEAKER FORMATTING:\n"
-                f"   - ALWAYS separate different speakers! Identify speaker changes from voice timbre, pitch, gender, and conversational turns.\n"
-                f"   - If different speakers converse, give each speaker their own subtitle event OR format dual-speaker lines with leading hyphens: '- Speaker 1\\n- Speaker 2'.\n"
-                f"7. TIMESTAMPS: Provide acoustic start_time and end_time for each subtitle event relative to this audio slice."
+                f"8. STRICT SINGLE-SPEAKER RULE (EXACTLY ONE SPEAKER PER EVENT):\n"
+                f"   - Detect speaker changes with high fidelity! Identify changes from voice acoustics, timbre, pitch, gender, and conversational turns.\n"
+                f"   - NEVER combine dialogue from two speakers into a single subtitle event. NEVER put 2 speakers in 1 subtitle.\n"
+                f"   - NEVER format multiple speakers with hyphens ('- Speaker 1\\n- Speaker 2').\n"
+                f"   - Each subtitle event must contain speech from EXACTLY ONE speaker.\n"
+                f"   - Set the 'speakers' array to contain exactly ONE speaker identity (e.g. ['Speaker 1']).\n"
+                f"9. STRICTLY SEQUENTIAL TIMELINE (ZERO OVERLAPS):\n"
+                f"   - Subtitle events must NOT overlap on the timeline. Ensure every subtitle ends before the next subtitle starts.\n"
+                f"   - If two speakers speak simultaneously or rapidly, transcribe both speakers completely, but sequence them sequentially on the timeline!\n"
+                f"10. TIMESTAMPS: Provide acoustic start_time and end_time for each subtitle event relative to this audio slice."
             )
             
             response = None
@@ -1345,6 +1544,7 @@ async def generate_subtitles_stream(
                     continue
             else:
                 parsed = extract_and_repair_subtitle_json(response.text)
+
             # Lock language and script across chunks
             if chunk_idx == 1:
                 if parsed.get("detected_language") and resolved_language in ["en", "auto", "Auto-Detect"]:
@@ -1357,13 +1557,12 @@ async def generate_subtitles_stream(
                 subs = parsed
                 
             # 1. Format raw batch events with absolute video timeline
-            chunk_dur = chunk_e - chunk_s
             batch_raw = []
             for s in subs:
                 st_val = s.get("start_time", 0.0)
                 et_val = s.get("end_time", 2.0)
-                s_sec = repair_chunk_timestamp(st_val, chunk_dur) + chunk_s
-                e_sec = repair_chunk_timestamp(et_val, chunk_dur) + chunk_s
+                s_sec = resolve_chunk_timestamp(st_val, chunk_s, chunk_e)
+                e_sec = resolve_chunk_timestamp(et_val, chunk_s, chunk_e)
                 if e_sec <= s_sec:
                     e_sec = round(s_sec + 1.5, 3)
                 batch_raw.append({
@@ -1378,7 +1577,11 @@ async def generate_subtitles_stream(
                     "is_forced_narrative": bool(s.get("is_forced_narrative", False))
                 })
             
-            # Stage 1A: Heal any cross-event dangling phrases (e.g. 'the wrong' | 'bedroom' or 'Mrs.' | 'Rutherford')
+            # Stage 0: Guarantee single speaker per event (split any multi-speaker events)
+            from app.netflix_linter import split_multi_speaker_subtitles
+            batch_raw = split_multi_speaker_subtitles(batch_raw, frame_rate=frame_rate, min_duration=min_duration)
+
+            # Stage 1A: Heal any cross-event dangling phrases
             batch_raw = heal_cross_event_dangling_phrases(batch_raw, cpl_limit=cpl_limit, max_lines=max_lines)
 
             # Stage 1B: Pre-split any oversized events that exceed 2 lines or cpl_limit (ZERO words dropped)
@@ -1386,12 +1589,51 @@ async def generate_subtitles_stream(
             for s in batch_raw:
                 split_batch.extend(split_and_balance_event(s, cpl_limit=cpl_limit, max_lines=max_lines))
 
-            # Stage 2: Monotonic Whisper Acoustic Synchronization (tight search radius 3.0s)
+            # Stage 2: Automated Quality Check
+            batch_lint = lint_all_subtitles(
+                events=split_batch,
+                shot_changes=shot_changes,
+                content_type=content_type,
+                frame_rate=frame_rate,
+                custom_cpl=cpl_limit,
+                custom_cps=max_cps,
+                custom_max_lines=max_lines,
+                custom_min_duration=min_duration,
+                custom_max_duration=max_duration,
+            )
+
+            # Stage 2B: Call AI again if QC errors detected (Gemini Self-Correction pass)
+            from app.gemini_qc_fixer import coordinate_gemini_qc_fix, _has_fixable_errors
+            violating_events = [ev for ev in batch_lint.get("events", []) if _has_fixable_errors(ev.get("qc_errors", []))]
+            if gemini_auto_fix and violating_events:
+                log_terminal(f"Batch {chunk_idx}: QC detected {len(violating_events)} violation(s). Calling Gemini self-correction pass...")
+                yield f"data: {json.dumps({'type': 'progress', 'chunk_index': chunk_idx, 'total_chunks': total_chunks, 'stage': f'AI Self-Correction for Batch {chunk_idx} ({len(violating_events)} issues)...'})}\n\n"
+                try:
+                    qc_fixed = await asyncio.to_thread(
+                        coordinate_gemini_qc_fix,
+                        events=split_batch,
+                        whisper_words=None,
+                        shot_changes=shot_changes,
+                        content_type=content_type,
+                        frame_rate=frame_rate,
+                        cpl_limit=cpl_limit,
+                        max_cps=max_cps,
+                        max_lines=max_lines,
+                        min_duration=min_duration,
+                        max_duration=max_duration
+                    )
+                    split_batch = qc_fixed.get("events", split_batch)
+                    log_terminal(f"Batch {chunk_idx}: Gemini self-correction resolved issues. Score: {qc_fixed.get('compliance_score', 100)}%")
+                except Exception as qc_err:
+                    log_terminal(f"Batch {chunk_idx} Gemini QC fix warning: {qc_err}")
+
+            # Stage 3: Whisper Acoustic Synchronization (preserving overlapping dialogues)
             active_words = chunk_whisper_words if chunk_whisper_words else [w for w in whisper_words if w["start"] >= chunk_s - 0.5 and w["end"] <= chunk_e + 0.5]
             if active_words and split_batch:
-                split_batch = align_subtitle_timestamps(split_batch, active_words, search_radius=3.0)
+                log_terminal(f"Batch {chunk_idx}: Synchronizing {len(split_batch)} events acoustically with Whisper...")
+                split_batch = align_subtitle_timestamps(split_batch, active_words, search_radius=8.0)
             
-            # Stage 3: Non-destructive Netflix polish (gap chaining & CPS padding)
+            # Stage 4: Non-destructive Netflix polish
             processed_batch = polish_subtitle_events_netflix(
                 events=split_batch,
                 cpl_limit=cpl_limit,
@@ -1403,17 +1645,27 @@ async def generate_subtitles_stream(
                 shot_changes=shot_changes
             )
 
-            # 4. Monotonic ID assignment & timeline tracking
+            # 5. Monotonic ID assignment & timeline tracking
             for ev in processed_batch:
                 ev["id"] = current_event_id
                 current_event_id += 1
                 prev_batch_end = ev["end_time"]
 
+            # Record last dialogue lines into rolling context for subsequent batches
+            for item in processed_batch[-5:]:
+                txt = item.get("text", "").replace("\n", " ").strip()
+                spk = (item.get("speakers") or ["Speaker"])[0]
+                if txt:
+                    rolling_context.append(f"{spk}: \"{txt}\"")
+            if len(rolling_context) > 10:
+                rolling_context = rolling_context[-10:]
+
             all_aligned_subtitles.extend(processed_batch)
             
-            # 5. Yield this batch with ALREADY PERFECT, PERMANENT acoustic sync and 0 errors!
+            # 6. Yield this batch AND notification for manual QC
             yield f"data: {json.dumps({'type': 'batch', 'chunk_index': chunk_idx, 'total_chunks': total_chunks, 'events': processed_batch})}\n\n"
-            log_terminal(f"Yielded Batch {chunk_idx}/{total_chunks} with {len(processed_batch)} perfectly synced events to frontend.")
+            yield f"data: {json.dumps({'type': 'batch_ready', 'chunk_index': chunk_idx, 'total_chunks': total_chunks, 'message': f'Part {chunk_idx} is complete! You can do manual QC on it now.'})}\n\n"
+            log_terminal(f"Yielded Batch {chunk_idx}/{total_chunks} with {len(processed_batch)} events. User notified: ready for manual QC!")
             
         finally:
             if total_chunks > 1 and os.path.exists(target_path):

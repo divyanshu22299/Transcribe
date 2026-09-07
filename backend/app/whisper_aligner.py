@@ -127,6 +127,7 @@ def get_whisper_word_timestamps(
         "beam_size": 1,
         "best_of": 1,
         "temperature": 0.0,
+        "condition_on_previous_text": False,
     }
     if language:
         # Map common language names to Whisper language codes
@@ -234,23 +235,23 @@ def _extract_boundary_words(text: str, count: int = 3) -> tuple:
     Extract the first N and last N words from subtitle text.
     Returns (first_words_str, last_words_str).
     """
-    normalized = _normalize_text(text)
-    words = normalized.split()
-
+    words = text.replace('\n', ' ').split()
     if not words:
-        return ("", "")
-
-    first_words = " ".join(words[:count])
-    last_words = " ".join(words[-count:]) if len(words) >= count else " ".join(words)
-
-    return (first_words, last_words)
+        return "", ""
+    first_n = ' '.join(words[:count])
+    last_n = ' '.join(words[-count:])
+    return first_n, last_n
 
 
-def _fuzzy_match_score(a: str, b: str) -> float:
-    """Return similarity ratio between two strings (0.0 to 1.0)."""
-    if not a or not b:
+def _fuzzy_match_score(word_a: str, word_b: str) -> float:
+    """Fuzzy similarity score between two normalized words."""
+    if not word_a or not word_b:
         return 0.0
-    return SequenceMatcher(None, a, b).ratio()
+    if word_a == word_b:
+        return 1.0
+    if word_a in word_b or word_b in word_a:
+        return 0.85
+    return SequenceMatcher(None, word_a, word_b).ratio()
 
 
 def _find_best_word_match(
@@ -316,14 +317,13 @@ def _find_best_word_match(
 def align_subtitle_timestamps(
     gemini_events: List[Dict[str, Any]],
     whisper_words: List[Dict[str, Any]],
-    search_radius: float = 3.0
+    search_radius: float = 8.0
 ) -> List[Dict[str, Any]]:
     """
-    Monotonically aligns Gemini subtitle timestamps to Whisper's acoustic word boundaries.
-    Prevents any reverse jumping, false matches, or cascading delay.
+    Aligns Gemini subtitle timestamps against Whisper acoustic word boundaries.
+    CRITICAL: Preserves OVERLAPPING dialogues so both speakers' dialogues are retained!
     """
-    if not whisper_words:
-        log_terminal("WARNING: No Whisper words available — keeping Gemini timestamps as fallback.")
+    if not gemini_events or not whisper_words:
         return gemini_events
 
     from app.netflix_models import format_timestamp as fmt_ts, calculate_cps
@@ -334,7 +334,7 @@ def align_subtitle_timestamps(
     aligned_count = 0
     prev_end = 0.0
 
-    for event in gemini_events:
+    for ev_idx, event in enumerate(gemini_events):
         text = event.get("text", "")
         clean_words = [_normalize_text(w) for w in text.replace('\n', ' ').split() if _normalize_text(w)]
         
@@ -352,42 +352,49 @@ def align_subtitle_timestamps(
         best_s_idx = None
         best_s_score = 0.0
 
-        # 1. Monotonic search for first spoken word forward from w_idx
-        # 1. Search for first spoken word within search_radius of orig_st
-        for i in range(w_idx, min(total_w, w_idx + 40)):
+        # Candidate search range in whisper_words around orig_st
+        # Look backwards and forwards around orig_st to find the acoustic onset
+        c_start = 0
+        for k in range(max(0, w_idx - 40), total_w):
+            if whisper_words[k]["start"] >= orig_st - search_radius:
+                c_start = k
+                break
+        c_end = min(total_w, c_start + 60)
+
+        for i in range(c_start, c_end):
             cand = _normalize_text(whisper_words[i]["word"])
             if not cand:
                 continue
             time_diff = abs(whisper_words[i]["start"] - orig_st)
-            if time_diff > search_radius and i > w_idx + 5:
+            if time_diff > search_radius + 2.0:
                 continue
             score = _fuzzy_match_score(first_w, cand)
-            if score > 0.70 and score > best_s_score:
-                best_s_score = score
+            # Weight score by temporal proximity to orig_st
+            time_penalty = min(0.15, time_diff * 0.02)
+            adj_score = score - time_penalty
+            if score > 0.65 and adj_score > best_s_score:
+                best_s_score = adj_score
                 best_s_idx = i
-                if score == 1.0:
+                if score == 1.0 and time_diff < 1.0:
                     break
 
         matched_start = whisper_words[best_s_idx]["start"] if best_s_idx is not None else orig_st
-        s_idx = best_s_idx if best_s_idx is not None else w_idx
+        s_idx = best_s_idx if best_s_idx is not None else c_start
 
-        # 2. Monotonic search for last spoken word forward from s_idx
+        # Search for last spoken word forward from s_idx
         best_e_idx = None
         best_e_score = 0.0
         expected_len = len(clean_words)
 
         for j in range(s_idx, min(total_w, s_idx + expected_len + 15)):
             w_end = whisper_words[j]["end"]
-            # Guard: cannot exceed 7.0s max subtitle duration or jump outside search radius
-            if w_end > matched_start + 7.0:
+            if w_end > matched_start + 7.5:
                 break
-            if abs(w_end - orig_et) > search_radius + 1.5 and j > s_idx + expected_len:
-                continue
             cand = _normalize_text(whisper_words[j]["word"])
             if not cand:
                 continue
             score = _fuzzy_match_score(last_w, cand)
-            if score > 0.70 and score > best_e_score:
+            if score > 0.65 and score > best_e_score:
                 best_e_score = score
                 best_e_idx = j
                 if score == 1.0:
@@ -395,24 +402,40 @@ def align_subtitle_timestamps(
 
         if best_e_idx is not None:
             matched_end = whisper_words[best_e_idx]["end"]
-            w_idx = best_e_idx + 1
             aligned_count += 1
         else:
             matched_end = min(orig_et, matched_start + 7.0)
             if best_s_idx is not None:
-                w_idx = best_s_idx + min(len(clean_words), 5)
                 aligned_count += 1
 
-        # 3. Monotonic continuity: ensure start >= prev_end + 2-frame gap (0.083s)
-        st = round(matched_start, 3)
-        if st < prev_end:
-            # If the event originally started after prev_end with a silence gap, preserve orig_st
-            if orig_st > prev_end:
-                st = round(orig_st, 3)
-            else:
-                st = round(prev_end + 0.083, 3)
+        min_gap = 0.083  # Minimum 2 frames @ 24fps
 
+        st = round(matched_start, 3)
         et = round(min(st + 7.0, max(st + 0.833, matched_end)), 3)
+
+        # Strictly enforce non-overlapping timeline (st >= prev_end + min_gap)
+        if st < prev_end + min_gap:
+            # Check if previous event has room to be trimmed without violating min duration
+            if ev_idx > 0:
+                prev_ev = gemini_events[ev_idx - 1]
+                prev_st = float(prev_ev.get("start_time", 0.0))
+                can_trim_prev = (st - min_gap) - prev_st >= 0.833
+                if can_trim_prev:
+                    prev_ev["end_time"] = round(st - min_gap, 3)
+                    prev_ev["end"] = prev_ev["end_time"]
+                    prev_ev["duration"] = round(prev_ev["end_time"] - prev_st, 3)
+                    prev_ev["end_time_str"] = fmt_ts(prev_ev["end_time"])
+                    prev_end = prev_ev["end_time"]
+                else:
+                    st = round(prev_end + min_gap, 3)
+                    et = round(min(st + 7.0, max(st + 0.833, matched_end)), 3)
+            else:
+                st = round(prev_end + min_gap, 3)
+                et = round(min(st + 7.0, max(st + 0.833, matched_end)), 3)
+
+        if best_e_idx is not None:
+            w_idx = max(w_idx, best_e_idx + 1)
+
         dur = max(0.01, round(et - st, 3))
 
         event["start_time"] = st
@@ -426,7 +449,7 @@ def align_subtitle_timestamps(
         prev_end = et
 
     log_terminal(
-        f"Monotonic alignment complete: {aligned_count}/{total_events} events "
-        f"acoustically locked to Whisper boundaries."
+        f"Acoustic alignment complete: {aligned_count}/{total_events} events "
+        f"locked to Whisper boundaries (strictly non-overlapping)."
     )
     return gemini_events

@@ -1,10 +1,152 @@
-import React, { useRef, useState, useEffect, useLayoutEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { ZoomIn, ZoomOut, Volume2, Split, Plus, AlertCircle, CheckCircle2, GripVertical, FastForward, Sun, Moon } from 'lucide-react';
+
+// Helper formatting for timecode
+function formatTime(seconds) {
+  if (isNaN(seconds) || seconds == null) return "00:00.000";
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  const ms = Math.floor((seconds % 1) * 1000);
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
+}
+
+// ── Memoized Timeline Subtitle Box (Zero Re-render on Playhead Movement) ──
+const TimelineSubtitleBlock = React.memo(function TimelineSubtitleBlock({
+  event,
+  zoomLevel,
+  isActive,
+  effectiveDuration,
+  cplLimit,
+  cpsLimit,
+  setActiveEventId,
+  onSeek,
+  handleMouseDown,
+  isInternalSeekRef,
+  scrollRef
+}) {
+  const start = event.start_time !== undefined ? event.start_time : (event.start !== undefined ? event.start : 0);
+  const end = event.end_time !== undefined ? event.end_time : (event.end !== undefined ? event.end : 0);
+  const startX = start * zoomLevel;
+  const width = Math.max((end - start) * zoomLevel, 14);
+  const id = event.id ?? event.event_id;
+  const errors = (event.qc_errors || event.errors || []).filter(err => {
+    const rid = (err.rule_id || '').toUpperCase();
+    const msg = (err.message || '').toLowerCase();
+    return !rid.includes('PYRAMID') && !msg.includes('pyramid') && !msg.includes('bottom-heavy');
+  });
+
+  const text = event.text || '';
+  const lines = text.split('\n');
+  const lineCpl = lines.map(l => l.replace(/<[^>]+>/g, '').trim().length);
+  const maxCpl = Math.max(...lineCpl, 0);
+  const dur = Math.max(0.1, end - start);
+  const calcCps = event.cps ? event.cps : (dur > 0 ? (text.replace(/<[^>]+>/g, '').trim().length / dur) : 0);
+
+  const hasCplError = maxCpl > cplLimit || errors.some(e => (e.rule_id || '').includes('CPL'));
+  const hasHardError = errors.some(e => (e.severity === 'error' || !e.severity) && !(e.rule_id || '').includes('CPS'));
+  const isRed = hasHardError || hasCplError;
+  const isYellow = !isRed && (calcCps > cpsLimit || errors.some(e => (e.rule_id || '').includes('CPS')));
+
+  return (
+    <div
+      key={id}
+      className={`absolute top-0.5 bottom-0.5 rounded-[4px] flex flex-col pointer-events-auto select-none transition-colors shadow-xs ${
+        isActive 
+          ? 'border-2 border-[#00e5be] bg-[#00e5be]/15 text-white z-30 shadow-[0_0_12px_rgba(0,229,190,0.3)] ring-1 ring-[#00e5be]/40 backdrop-blur-[1px]' 
+          : 'z-20 hover:brightness-110'
+      } ${
+        isRed 
+          ? 'bg-rose-950/40 border-2 border-rose-500 text-rose-100 backdrop-blur-[1px]' 
+          : isYellow
+          ? 'bg-amber-950/40 border-2 border-amber-400 text-amber-100 backdrop-blur-[1px]' 
+          : 'bg-[#181920]/85 border border-[#262734] text-slate-200 backdrop-blur-[1px]'
+      }`}
+      style={{ left: `${startX}px`, width: `${width}px` }}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (isInternalSeekRef) isInternalSeekRef.current = true;
+        const rect = scrollRef.current?.getBoundingClientRect();
+        if (rect) {
+          const clickX = e.clientX - rect.left + scrollRef.current.scrollLeft;
+          const clickedTime = Math.max(0, Math.min(effectiveDuration, clickX / zoomLevel));
+          setActiveEventId(id);
+          onSeek(clickedTime);
+        } else {
+          setActiveEventId(id);
+          onSeek(start);
+        }
+      }}
+    >
+      {/* Active Top Glowing Accent Line */}
+      {isActive && (
+        <div className="absolute top-0 left-0 right-0 h-0.5 bg-[#00e5be] shadow-[0_0_8px_rgba(0,229,190,1)] z-30" />
+      )}
+
+      {/* Left Trim Handle (In-Point) */}
+      <div
+        onMouseDown={(e) => handleMouseDown(e, id, 'resize-start')}
+        className="absolute left-0 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-[#00e5be] flex items-center justify-center z-30 group/handle bg-black/30"
+        title="Drag to trim In-Point"
+      >
+        <div className="w-0.5 h-7 bg-[#00e5be] group-hover/handle:bg-white transition-all" />
+      </div>
+
+      {/* Body Drag Area (Move Entire Subtitle) */}
+      <div 
+        onMouseDown={(e) => handleMouseDown(e, id, 'move')}
+        className="flex-1 px-3 py-1 flex flex-col justify-between cursor-grab active:cursor-grabbing overflow-hidden"
+        title="Click & drag to move subtitle block"
+      >
+        {/* Top Meta Bar */}
+        <div className="flex items-center justify-between text-[9.5px] font-mono border-b border-[#262734] pb-0.5 shrink-0">
+          <span className="font-bold px-1.5 py-0.2 rounded bg-[#00e5be] text-black font-mono shadow-2xs">
+            #{id}
+          </span>
+          <div className="flex items-center gap-1">
+            <span className="font-bold">{dur.toFixed(2)}s</span>
+            {isRed ? (
+              <span className="bg-rose-600 text-white text-[8px] font-bold px-1 rounded shadow-xs">
+                {hasCplError ? `${maxCpl}L` : 'ERR'}
+              </span>
+            ) : isYellow ? (
+              <span className="bg-amber-500 text-slate-950 text-[8px] font-bold px-1 rounded shadow-xs">
+                {calcCps.toFixed(1)} CPS
+              </span>
+            ) : (
+              <CheckCircle2 className="w-3 h-3 text-[#00e5be] shrink-0" />
+            )}
+          </div>
+        </div>
+
+        {/* Dialogue Line Text in center */}
+        <div className="text-[11.5px] leading-snug line-clamp-3 font-sans font-bold whitespace-pre-wrap my-auto px-0.5 text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)]">
+          {event.text}
+        </div>
+
+        {/* Bottom Timecode Readout */}
+        <div className="text-[9px] font-mono flex justify-between shrink-0 font-bold text-slate-300">
+          <span>{formatTime(start)}</span>
+          <span>{formatTime(end)}</span>
+        </div>
+      </div>
+
+      {/* Right Trim Handle (Out-Point) */}
+      <div
+        onMouseDown={(e) => handleMouseDown(e, id, 'resize-end')}
+        className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-[#00e5be] flex items-center justify-center z-30 group/handle bg-black/30"
+        title="Drag to trim Out-Point"
+      >
+        <div className="w-0.5 h-7 bg-[#00e5be] group-hover/handle:bg-white transition-all" />
+      </div>
+    </div>
+  );
+});
 
 export default function AudioWaveformTimeline({
   videoUrl = null,
   selectedFile = null,
   videoId = null,
+  initialPeaks = [],
   API_BASE = '',
   events = [],
   shotChanges = [],
@@ -22,7 +164,7 @@ export default function AudioWaveformTimeline({
   theme = 'dark', // 'dark' | 'light'
 }) {
   const [zoomLevel, setZoomLevel] = useState(70); // pixels per second (25 - 250)
-  const [waveformPeaks, setWaveformPeaks] = useState([]); // Array of float 0-1
+  const [waveformPeaks, setWaveformPeaks] = useState(initialPeaks || []); // Array of float 0-1
   const [waveformPointsPerSec, setWaveformPointsPerSec] = useState(50);
   const [isAudioLoading, setIsAudioLoading] = useState(false);
   
@@ -32,6 +174,14 @@ export default function AudioWaveformTimeline({
   const lastActiveIdRef = useRef(activeEventId);
   const lastTimeRef = useRef(currentTime);
 
+  // Instant reactive binding when initialPeaks arrive from upload response
+  useEffect(() => {
+    if (initialPeaks && initialPeaks.length > 0) {
+      setWaveformPeaks(initialPeaks);
+      setIsAudioLoading(false);
+    }
+  }, [initialPeaks]);
+
   // Center-oriented zoom tracking
   const zoomCenterTimeRef = useRef(null);
   const isZoomingRef = useRef(false);
@@ -39,6 +189,7 @@ export default function AudioWaveformTimeline({
   // Dragging State for Subtitle Blocks
   const [dragState, setDragState] = useState(null);
   const [dragTooltip, setDragTooltip] = useState(null); // { x, timeStr, durStr }
+  const [viewportScroll, setViewportScroll] = useState({ scrollLeft: 0, clientWidth: 1000 });
 
   const isDark = theme === 'dark';
 
@@ -58,22 +209,57 @@ export default function AudioWaveformTimeline({
 
   const timelineWidth = Math.max(effectiveDuration * zoomLevel, scrollRef.current?.clientWidth || 900);
 
-  // ── 1. High-Precision Acoustic Waveform Extraction ──
+  // Viewport subtitle filtering: only render events within [visibleStartTime, visibleEndTime] with a 15-second buffer
+  const bufferSec = 15;
+  const visibleStartTime = Math.max(0, (viewportScroll.scrollLeft / zoomLevel) - bufferSec);
+  const visibleEndTime = ((viewportScroll.scrollLeft + viewportScroll.clientWidth) / zoomLevel) + bufferSec;
+
+  const visibleTimelineEvents = useMemo(() => {
+    return events.filter(e => {
+      const st = e.start_time !== undefined ? e.start_time : (e.start !== undefined ? e.start : 0);
+      const en = e.end_time !== undefined ? e.end_time : (e.end !== undefined ? e.end : 0);
+      return en >= visibleStartTime && st <= visibleEndTime;
+    });
+  }, [events, visibleStartTime, visibleEndTime]);
+
+  // ── 1. High-Precision Acoustic Waveform Extraction (Instant Loading & Fast Cache) ──
   useEffect(() => {
     let isCancelled = false;
 
     const loadWaveform = async () => {
-      // Priority 1: Backend Acoustic Peaks Endpoint (100% physically aligned, 0.1s response)
-      if (videoId) {
+      // Priority 0: Instant Initial Peaks or Fast Session Storage Cache (< 1ms)
+      if (initialPeaks && initialPeaks.length > 0) {
+        setWaveformPeaks(initialPeaks);
+        setIsAudioLoading(false);
+        return;
+      }
+
+      const targetId = videoId || (selectedFile?.name ? selectedFile.name.replace(/\.[^/.]+$/, '') : null);
+
+      if (targetId) {
+        try {
+          const cached = sessionStorage.getItem(`karya_peaks_${targetId}`);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (parsed && parsed.length > 0) {
+              setWaveformPeaks(parsed);
+              setIsAudioLoading(false);
+              return;
+            }
+          }
+        } catch (_) {}
+      }
+
+      // Priority 1: Backend Acoustic Peaks Endpoint (Instant 20ms cache response)
+      if (targetId) {
         try {
           setIsAudioLoading(true);
           const base = API_BASE || '';
-          let res = await fetch(`${base}/api/subtitle/waveform/${encodeURIComponent(videoId)}`);
+          let res = await fetch(`${base}/api/subtitle/waveform/${encodeURIComponent(targetId)}`);
           if (!res.ok && res.status === 404) {
-            // Allow background conversion task up to 1.5s to finish WAV extraction and retry
-            await new Promise(r => setTimeout(r, 1500));
+            await new Promise(r => setTimeout(r, 600));
             if (isCancelled) return;
-            res = await fetch(`${base}/api/subtitle/waveform/${encodeURIComponent(videoId)}`);
+            res = await fetch(`${base}/api/subtitle/waveform/${encodeURIComponent(targetId)}`);
           }
           if (res.ok) {
             const data = await res.json();
@@ -81,6 +267,12 @@ export default function AudioWaveformTimeline({
               setWaveformPeaks(data.peaks);
               setWaveformPointsPerSec(data.points_per_sec || 50);
               setIsAudioLoading(false);
+              try {
+                sessionStorage.setItem(`karya_peaks_${targetId}`, JSON.stringify(data.peaks));
+                if (videoId && videoId !== targetId) {
+                  sessionStorage.setItem(`karya_peaks_${videoId}`, JSON.stringify(data.peaks));
+                }
+              } catch (_) {}
               return;
             }
           }
@@ -249,8 +441,18 @@ export default function AudioWaveformTimeline({
     let rafId = null;
     const handleScrollOrResize = () => {
       if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(drawWaveform);
+      rafId = requestAnimationFrame(() => {
+        drawWaveform();
+        if (scrollElem) {
+          setViewportScroll({
+            scrollLeft: scrollElem.scrollLeft,
+            clientWidth: scrollElem.clientWidth || 1000
+          });
+        }
+      });
     };
+
+    handleScrollOrResize();
 
     scrollElem.addEventListener('scroll', handleScrollOrResize, { passive: true });
     window.addEventListener('resize', handleScrollOrResize);
@@ -584,121 +786,25 @@ export default function AudioWaveformTimeline({
             </div>
           )}
 
-          {/* ── Subtitle Boxes (CapCut Dark Studio Blocks) ── */}
+          {/* ── Subtitle Boxes (CapCut Dark Studio Blocks - Viewport Virtualized) ── */}
           <div className="absolute top-6 bottom-0 w-full pointer-events-none z-20">
-            {events.map((event) => {
-              const start = getStart(event);
-              const end = getEnd(event);
-              const startX = start * zoomLevel;
-              const width = Math.max((end - start) * zoomLevel, 14);
+            {visibleTimelineEvents.map((event) => {
               const id = event.id ?? event.event_id;
-              const isActive = activeEventId === id;
-              const errors = getErrors(event);
-              
-              const text = event.text || '';
-              const lines = text.split('\n');
-              const lineCpl = lines.map(l => l.replace(/<[^>]+>/g, '').trim().length);
-              const maxCpl = Math.max(...lineCpl, 0);
-              const dur = Math.max(0.1, end - start);
-              const calcCps = event.cps ? event.cps : (dur > 0 ? (text.replace(/<[^>]+>/g, '').trim().length / dur) : 0);
-
-              const hasCplError = maxCpl > cplLimit || errors.some(e => (e.rule_id || '').includes('CPL'));
-              const hasHardError = errors.some(e => (e.severity === 'error' || !e.severity) && !(e.rule_id || '').includes('CPS'));
-              const isRed = hasHardError || hasCplError;
-              const isYellow = !isRed && (calcCps > cpsLimit || errors.some(e => (e.rule_id || '').includes('CPS')));
-              
               return (
-                <div
+                <TimelineSubtitleBlock
                   key={id}
-                  className={`absolute top-0.5 bottom-0.5 rounded-[4px] flex flex-col pointer-events-auto select-none transition-colors shadow-xs ${
-                    isActive 
-                      ? 'border-2 border-[#00e5be] bg-[#00e5be]/15 text-white z-30 shadow-[0_0_12px_rgba(0,229,190,0.3)] ring-1 ring-[#00e5be]/40 backdrop-blur-[1px]' 
-                      : 'z-20 hover:brightness-110'
-                  } ${
-                    isRed 
-                      ? 'bg-rose-950/40 border-2 border-rose-500 text-rose-100 backdrop-blur-[1px]' 
-                      : isYellow
-                      ? 'bg-amber-950/40 border-2 border-amber-400 text-amber-100 backdrop-blur-[1px]' 
-                      : 'bg-[#181920]/85 border border-[#262734] text-slate-200 backdrop-blur-[1px]'
-                  }`}
-                  style={{ left: `${startX}px`, width: `${width}px` }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    isInternalSeekRef.current = true;
-                    const rect = scrollRef.current?.getBoundingClientRect();
-                    if (rect) {
-                      const clickX = e.clientX - rect.left + scrollRef.current.scrollLeft;
-                      const clickedTime = Math.max(0, Math.min(effectiveDuration, clickX / zoomLevel));
-                      setActiveEventId(id);
-                      onSeek(clickedTime);
-                    } else {
-                      setActiveEventId(id);
-                      onSeek(start);
-                    }
-                  }}
-                >
-                  {/* Active Top Glowing Accent Line */}
-                  {isActive && (
-                    <div className="absolute top-0 left-0 right-0 h-0.5 bg-[#00e5be] shadow-[0_0_8px_rgba(0,229,190,1)] z-30" />
-                  )}
-
-                  {/* Left Trim Handle (In-Point) */}
-                  <div
-                    onMouseDown={(e) => handleMouseDown(e, id, 'resize-start')}
-                    className="absolute left-0 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-[#00e5be] flex items-center justify-center z-30 group/handle bg-black/30"
-                    title="Drag to trim In-Point"
-                  >
-                    <div className="w-0.5 h-7 bg-[#00e5be] group-hover/handle:bg-white transition-all" />
-                  </div>
-
-                  {/* Body Drag Area (Move Entire Subtitle) */}
-                  <div 
-                    onMouseDown={(e) => handleMouseDown(e, id, 'move')}
-                    className="flex-1 px-3 py-1 flex flex-col justify-between cursor-grab active:cursor-grabbing overflow-hidden"
-                    title="Click & drag to move subtitle block"
-                  >
-                    {/* Top Meta Bar */}
-                    <div className="flex items-center justify-between text-[9.5px] font-mono border-b border-[#262734] pb-0.5 shrink-0">
-                      <span className="font-bold px-1.5 py-0.2 rounded bg-[#00e5be] text-black font-mono shadow-2xs">
-                        #{id}
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <span className="font-bold">{dur.toFixed(2)}s</span>
-                        {isRed ? (
-                          <span className="bg-rose-600 text-white text-[8px] font-bold px-1 rounded shadow-xs">
-                            {hasCplError ? `${maxCpl}L` : 'ERR'}
-                          </span>
-                        ) : isYellow ? (
-                          <span className="bg-amber-500 text-slate-950 text-[8px] font-bold px-1 rounded shadow-xs">
-                            {calcCps.toFixed(1)} CPS
-                          </span>
-                        ) : (
-                          <CheckCircle2 className="w-3 h-3 text-[#00e5be] shrink-0" />
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Dialogue Line Text in center */}
-                    <div className="text-[11.5px] leading-snug line-clamp-3 font-sans font-bold whitespace-pre-wrap my-auto px-0.5 text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)]">
-                      {event.text}
-                    </div>
-
-                    {/* Bottom Timecode Readout */}
-                    <div className="text-[9px] font-mono flex justify-between shrink-0 font-bold text-slate-300">
-                      <span>{formatTime(start)}</span>
-                      <span>{formatTime(end)}</span>
-                    </div>
-                  </div>
-
-                  {/* Right Trim Handle (Out-Point) */}
-                  <div
-                    onMouseDown={(e) => handleMouseDown(e, id, 'resize-end')}
-                    className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-[#00e5be] flex items-center justify-center z-30 group/handle bg-black/30"
-                    title="Drag to trim Out-Point"
-                  >
-                    <div className="w-0.5 h-7 bg-[#00e5be] group-hover/handle:bg-white transition-all" />
-                  </div>
-                </div>
+                  event={event}
+                  zoomLevel={zoomLevel}
+                  isActive={activeEventId === id}
+                  effectiveDuration={effectiveDuration}
+                  cplLimit={cplLimit}
+                  cpsLimit={cpsLimit}
+                  setActiveEventId={setActiveEventId}
+                  onSeek={onSeek}
+                  handleMouseDown={handleMouseDown}
+                  isInternalSeekRef={isInternalSeekRef}
+                  scrollRef={scrollRef}
+                />
               );
             })}
           </div>
