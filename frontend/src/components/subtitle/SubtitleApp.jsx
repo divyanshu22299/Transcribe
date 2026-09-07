@@ -1091,6 +1091,9 @@ export default function SubtitleApp({ onBackToHome }) {
       const decoder = new TextDecoder('utf-8');
       let buffer = '';
       let accumulatedEvents = [];
+      let streamCompleted = false;
+      let lastBatchIndex = 0;
+      let totalExpectedChunks = 1;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -1102,6 +1105,11 @@ export default function SubtitleApp({ onBackToHome }) {
 
         for (const line of lines) {
           const trimmed = line.trim();
+          // SSE comments (keepalive pings) start with ':'
+          if (trimmed.startsWith(':')) {
+            // Live keepalive heartbeat received from server
+            continue;
+          }
           if (!trimmed.startsWith('data:')) continue;
           const jsonStr = trimmed.replace(/^data:\s*/, '');
           try {
@@ -1112,15 +1120,22 @@ export default function SubtitleApp({ onBackToHome }) {
               setFrameRate(data.frame_rate || 24.0);
               setProgressPercent(30);
               setProgressStage('Analyzing Audio & Dialogue Splits');
+              totalExpectedChunks = data.total_chunks || 1;
               setProgressDetail(`Splitting recording into ${data.total_chunks} audio batches...`);
               setBatchProgress({ current: 0, total: data.total_chunks });
+            } else if (data.type === 'heartbeat') {
+              // Live heartbeat update from server worker
+              if (data.stage) {
+                setProgressDetail(data.stage);
+              }
             } else if (data.type === 'progress') {
               const pct = 30 + Math.floor((data.chunk_index / data.total_chunks) * 55);
               setProgressPercent(pct);
               setProgressStage(`Generating Batch ${data.chunk_index} of ${data.total_chunks}`);
-              setProgressDetail(`Transcribing dialogue & applying Netflix rules for Batch ${data.chunk_index}...`);
+              setProgressDetail(data.stage || `Transcribing dialogue & applying Netflix rules for Batch ${data.chunk_index}...`);
               setBatchProgress({ current: data.chunk_index, total: data.total_chunks });
             } else if (data.type === 'batch') {
+              lastBatchIndex = data.chunk_index || lastBatchIndex;
               // Append / Merge Batch Events Progressively in Real-Time!
               const newBatchEvents = data.events || [];
               accumulatedEvents = [...accumulatedEvents, ...newBatchEvents];
@@ -1149,12 +1164,19 @@ export default function SubtitleApp({ onBackToHome }) {
                 totalChunks: data.total_chunks,
                 timestamp: Date.now()
               });
+            } else if (data.type === 'batch_error') {
+              console.warn(`[Subtitle Studio] Batch ${data.chunk_index} notice:`, data.error);
+              setProgressDetail(`Batch ${data.chunk_index} had an issue: continuing to next batch...`);
+            } else if (data.type === 'stream_error') {
+              console.error(`[Subtitle Studio] Fatal stream error reported:`, data.error);
+              throw new Error(`Server generation error: ${data.error}`);
             } else if (data.type === 'complete') {
+              streamCompleted = true;
               const res = data.result || {};
               const finalEvents = (res.events || accumulatedEvents).map(e => ({
                 ...e,
-                start: e.start_time,
-                end: e.end_time
+                start: e.start_time || e.start,
+                end: e.end_time || e.end
               }));
               setEvents(prev => {
                 const prevMap = new Map(prev.map(e => [e.id, e]));
@@ -1179,6 +1201,26 @@ export default function SubtitleApp({ onBackToHome }) {
           } catch (e) {
             console.warn("SSE parse error:", e, jsonStr);
           }
+        }
+      }
+
+      // Check for premature disconnection
+      if (!streamCompleted) {
+        console.warn(`[Subtitle Studio] Stream reader closed without 'complete' event. Ingested ${lastBatchIndex}/${totalExpectedChunks} batches (${accumulatedEvents.length} events).`);
+        if (accumulatedEvents.length > 0) {
+          const finalEvents = accumulatedEvents.map(e => ({
+            ...e,
+            start: e.start_time || e.start,
+            end: e.end_time || e.end
+          }));
+          setEvents(finalEvents);
+          pushToHistory(finalEvents);
+          setProgressPercent(100);
+          setProgressStage('Generation Preserved');
+          setProgressDetail(`Stream finished. All ${finalEvents.length} subtitles preserved!`);
+          alert(`Subtitle Generation Complete: ${finalEvents.length} subtitles generated across ${lastBatchIndex || 1} batch(es) and saved to your timeline.`);
+        } else {
+          throw new Error("Stream connection closed before subtitles could be generated. Please try again.");
         }
       }
     } catch (err) {

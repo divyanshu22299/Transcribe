@@ -1360,10 +1360,11 @@ async def generate_subtitles_stream_endpoint(payload: dict):
             max_duration=max_duration,
             gemini_auto_fix=gemini_auto_fix,
         ),
-        media_type="text/event-stream",
+        media_type="text/event-stream; charset=utf-8",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-transform",
             "Connection": "keep-alive",
+            "Content-Type": "text/event-stream; charset=utf-8",
             "X-Accel-Buffering": "no"
         }
     )
