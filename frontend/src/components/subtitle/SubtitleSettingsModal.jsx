@@ -374,7 +374,7 @@ export default function SubtitleSettingsModal({
                   <div>
                     <span className="font-bold text-xs block">Backend API Server URL</span>
                     <span className="text-[10px] text-slate-400">
-                      Required for live websites (e.g. Render, Railway, Cloud Run or Cloudflare/Ngrok URL)
+                      Required for live websites. Enter base URL without <code className="text-[#00e5be]">/api</code> (e.g. <code className="text-slate-300">https://transcribe-qqwn.onrender.com</code>)
                     </span>
                   </div>
                 </div>
@@ -387,7 +387,7 @@ export default function SubtitleSettingsModal({
               <div className="flex gap-2">
                 <input
                   type="text"
-                  placeholder="https://your-backend.onrender.com (or leave empty for localhost)"
+                  placeholder="https://transcribe-qqwn.onrender.com"
                   value={apiUrl}
                   onChange={e => {
                     setApiUrl(e.target.value);
@@ -398,21 +398,29 @@ export default function SubtitleSettingsModal({
                 <button
                   type="button"
                   onClick={async () => {
-                    const target = (apiUrl || '').trim().replace(/\/+$/, '');
-                    if (!target) {
+                    const raw = (apiUrl || '').trim().replace(/\/+$/, '').replace(/\/api\/?$/i, '');
+                    if (!raw) {
                       setTestStatus({ success: false, message: 'URL is empty (using default proxy)' });
                       return;
                     }
                     try {
                       setTestStatus({ success: true, message: 'Testing...' });
-                      const res = await fetch(`${target}/health`, { method: 'GET' });
-                      if (res.ok) {
-                        setTestStatus({ success: true, message: 'Connected ✓ (Backend Healthy)' });
+                      let res = await fetch(`${raw}/api/health`, { method: 'GET' }).catch(() => null);
+                      if (!res || !res.ok) {
+                        res = await fetch(`${raw}/health`, { method: 'GET' }).catch(() => null);
+                      }
+                      if (!res || !res.ok) {
+                        res = await fetch(`${raw}/`, { method: 'GET' }).catch(() => null);
+                      }
+                      if (res && res.ok) {
+                        const data = await res.json().catch(() => ({}));
+                        const keyMsg = data.has_gemini_api_key === false ? ' (Note: Gemini API key missing on backend)' : '';
+                        setTestStatus({ success: true, message: `Connected ✓ (Backend Online${keyMsg})` });
                       } else {
-                        setTestStatus({ success: false, message: `Status ${res.status}` });
+                        setTestStatus({ success: false, message: res ? `Status ${res.status}` : 'Could not reach server (cold start?)' });
                       }
                     } catch (e) {
-                      setTestStatus({ success: false, message: 'Failed: Check URL/HTTPS' });
+                      setTestStatus({ success: false, message: 'Failed: Check URL/HTTPS or CORS' });
                     }
                   }}
                   className="px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer border border-[#262734] bg-[#14151a] text-[#00e5be] hover:bg-[#22232c] transition-colors"

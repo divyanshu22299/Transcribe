@@ -966,10 +966,16 @@ export default function SubtitleApp({ onBackToHome }) {
                         err.message?.includes('Network error') ||
                         err.message?.includes('Load failed');
       if (isNetwork) {
+        const isLarge = selectedFile && selectedFile.size > 95 * 1024 * 1024;
+        let hint = '';
+        if (isLarge) {
+          hint = `\n\n⚠️ File Size Limit: Your file is ${(selectedFile.size / (1024 * 1024)).toFixed(0)} MB. Cloud services (Render + Cloudflare) reject requests larger than 100 MB.\nSolution: Upload an audio file (.mp3, .wav, .m4a) instead of the full raw video, which is much smaller and processes faster.`;
+        } else {
+          hint = `\n\nTroubleshooting:\n1. Render Cold Start: Free-tier Render spins down after 15 mins. It takes ~50 seconds to boot up. Once live, try again.\n2. URL Check: In Settings ⚙️, make sure the Backend API URL is https://transcribe-qqwn.onrender.com (do not add /api).`;
+        }
         alert(
           `Network Error: Cannot connect to Backend Server.\n\n` +
-          `Current API URL: ${API_BASE || '(relative / localhost)'}\n\n` +
-          `If this is a live deployed website, you must configure your live Backend API URL (e.g. Render, Railway, or Cloudflare/Ngrok URL) in Settings ⚙️.`
+          `Current API URL: ${API_BASE || '(relative / localhost)'}${hint}`
         );
         setShowSettingsModal(true);
       } else {

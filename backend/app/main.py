@@ -154,6 +154,8 @@ def root_endpoint():
     }
 
 
+@app.get("/health")
+@app.head("/health")
 @app.get("/api/health")
 @app.head("/api/health")
 async def health_check():
