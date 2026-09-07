@@ -220,18 +220,15 @@ def test_rate_limiting_and_session_eviction():
     import time
     from fastapi import HTTPException
 
-    # Rate limiting test
+    # Rate limiting test up to RATE_LIMIT_PER_MINUTE
     test_ip = "192.168.1.100"
     _client_request_history[test_ip] = []
     
-    # 29 allowed calls
-    for _ in range(29):
+    from app.main import RATE_LIMIT_PER_MINUTE
+    for _ in range(RATE_LIMIT_PER_MINUTE):
         _check_rate_limit(test_ip)
     
-    # 30th call allowed
-    _check_rate_limit(test_ip)
-    
-    # 31st call triggers 429
+    # Next call triggers 429
     with pytest.raises(HTTPException) as exc_info:
         _check_rate_limit(test_ip)
     assert exc_info.value.status_code == 429

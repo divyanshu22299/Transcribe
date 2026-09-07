@@ -977,18 +977,20 @@ export default function SubtitleApp({ onBackToHome }) {
       setProgressPercent(6);
       setProgressStage('Connecting to Server');
       setProgressDetail('Checking backend connection...');
-      for (let attempt = 1; attempt <= 12; attempt++) {
+      for (let attempt = 1; attempt <= 8; attempt++) {
         try {
           const ctrl = new AbortController();
-          const tId = setTimeout(() => ctrl.abort(), 3500);
+          const tId = setTimeout(() => ctrl.abort(), 4000);
           const ping = await fetch(`${API_BASE}/api/health`, { method: 'GET', signal: ctrl.signal });
           clearTimeout(tId);
           if (ping.ok) {
             break;
           }
         } catch (_) {}
-        setProgressDetail(`Server is waking up (Render boot: ${attempt * 3}s)... please wait`);
-        await new Promise(r => setTimeout(r, 3000));
+        if (attempt < 8) {
+          setProgressDetail(`Server is waking up (Render boot: ${attempt * 5}s)... please wait`);
+          await new Promise(r => setTimeout(r, 5000));
+        }
       }
 
       let videoId = currentVideoId;

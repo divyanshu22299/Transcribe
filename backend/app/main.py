@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 
 from app.config import UPLOAD_DIR, EXPORTS_DIR, GEMINI_API_KEY, GEMINI_MODEL, DEFAULT_LANGUAGE, DEFAULT_SCRIPT
 from app.models import (
@@ -61,7 +61,14 @@ def _evict_expired_sessions():
 
 # BUG-W1: In-memory sliding window rate limiter
 _client_request_history = defaultdict(list)
-RATE_LIMIT_PER_MINUTE = 30
+RATE_LIMIT_PER_MINUTE = 300  # Generous rate limit (300 req/min) to accommodate sliced chunk uploads and telemetry
+
+def get_client_ip(request: Request) -> str:
+    """Extract real client IP behind reverse proxy (Render, Cloudflare, etc.)."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "127.0.0.1"
 
 def _check_rate_limit(client_ip: str):
     """BUG-W1: Enforce sliding window rate limit per client IP."""
@@ -71,7 +78,7 @@ def _check_rate_limit(client_ip: str):
     if len(_client_request_history[client_ip]) >= RATE_LIMIT_PER_MINUTE:
         raise HTTPException(
             status_code=429,
-            detail="Rate limit exceeded. Maximum 30 requests per minute allowed."
+            detail="Rate limit exceeded. Maximum 300 requests per minute allowed."
         )
     _client_request_history[client_ip].append(now)
 
@@ -103,35 +110,72 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware for frontend communication
-# BUG-12: In production, set ALLOWED_ORIGINS env var to your frontend domain(s).
+# CORS configuration with explicit Vercel and local dev support
+DEFAULT_ALLOWED_ORIGINS = [
+    "https://transcribes.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+]
 _raw_origins = os.getenv("ALLOWED_ORIGINS", "")
 ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+for default_o in DEFAULT_ALLOWED_ORIGINS:
+    if default_o not in ALLOWED_ORIGINS:
+        ALLOWED_ORIGINS.append(default_o)
 
-if not ALLOWED_ORIGINS:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origin_regex=r"^https?://.*",
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"^https?://.*",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
+
+
+@app.exception_handler(HTTPException)
+async def custom_http_exception_handler(request: Request, exc: HTTPException):
+    """Ensure HTTP exceptions (e.g. 429, 404, 413) always include CORS headers."""
+    origin = request.headers.get("origin") or "*"
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers={
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+        }
     )
-else:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=ALLOWED_ORIGINS,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+
+
+@app.exception_handler(Exception)
+async def custom_general_exception_handler(request: Request, exc: Exception):
+    """Ensure unhandled 500 exceptions always include CORS headers so browsers see the real error."""
+    origin = request.headers.get("origin") or "*"
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal server error: {str(exc)}"},
+        headers={
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+        }
     )
 
 
 @app.middleware("http")
 async def add_security_headers(request, call_next):
-    """REL-07: Add modern security response headers."""
+    """REL-07: Add modern security response headers without breaking CORS."""
     response = await call_next(request)
+    origin = request.headers.get("origin")
+    if origin and "Access-Control-Allow-Origin" not in response.headers:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=()"
     return response
@@ -176,7 +220,7 @@ MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024  # 200 MB limit
 @app.post("/api/upload")
 async def upload_audio(request: Request, file: UploadFile = File(...)):
     """Upload single audio file and perform initial inspection."""
-    client_ip = request.client.host if request.client else "127.0.0.1"
+    client_ip = get_client_ip(request)
     _check_rate_limit(client_ip)
 
     # Validate file size
@@ -930,7 +974,7 @@ async def cancel_batch_task(task_id: str):
 @app.post("/api/subtitle/upload")
 async def upload_video(request: Request, file: UploadFile = File(...)):
     """Upload media file (video or pure audio) and perform initial inspection."""
-    client_ip = request.client.host if request.client else "127.0.0.1"
+    client_ip = get_client_ip(request)
     _check_rate_limit(client_ip)
 
     MAX_UPLOAD_SIZE = 4 * 1024 * 1024 * 1024  # 4 GB
@@ -1066,8 +1110,6 @@ async def upload_video_chunk(
     filename: str = Form(...)
 ):
     """Receive sliced file chunk (<=20MB) to bypass cloud proxy request limits seamlessly."""
-    client_ip = request.client.host if request.client else "127.0.0.1"
-    _check_rate_limit(client_ip)
 
     ext = Path(filename).suffix.lower()
     if ext not in get_supported_media_extensions():
