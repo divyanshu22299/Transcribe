@@ -1367,10 +1367,11 @@ async def generate_subtitles_stream(
     dual_ch_info = await asyncio.to_thread(detect_dual_channel_layout, audio_path_out)
     is_dual_channel = dual_ch_info.get("is_dual_channel", False)
     
-    # 3. Run Whisper on audio for word-level timestamps
-    # For audio <= 180s (3 minutes), run Whisper on full audio upfront (fast, 2-4s)
+    # 3. Run Whisper on audio for word-level timestamps (skipped on cloud/memory-constrained environments)
+    is_cloud = bool(os.getenv("RENDER") or os.getenv("PORT"))
+    enable_whisper = os.getenv("ENABLE_WHISPER", "false" if is_cloud else "true").lower() == "true"
     whisper_words = []
-    if total_duration <= 180.0:
+    if enable_whisper and total_duration <= 180.0:
         log_terminal("Running Whisper for precise timestamp extraction...")
         yield f"data: {json.dumps({'type': 'progress', 'chunk_index': 0, 'total_chunks': 0, 'stage': 'Extracting word-level timestamps with Whisper...'})}\n\n"
         try:
@@ -1378,6 +1379,8 @@ async def generate_subtitles_stream(
             log_terminal(f"Whisper produced {len(whisper_words)} word timestamps for alignment.")
         except Exception as e:
             log_terminal(f"WARNING: Whisper failed ({e}), will use Gemini timestamps as fallback.")
+    elif not enable_whisper:
+        log_terminal("Cloud instance / Fast mode: using Gemini native millisecond audio timestamps for ultra-fast generation.")
     
     # 4. Chunk long audio: 180s target chunks (3 minutes) instead of 50s!
     # A 47-minute file will now be ~15 natural batches with rich conversational context instead of 54 fragmented slices!
@@ -1427,9 +1430,9 @@ async def generate_subtitles_stream(
         else:
             target_path = audio_path_out
 
-        # For long audio (> 180s), run Whisper specifically on this slice
+        # For long audio (> 180s), run Whisper specifically on this slice (if enabled)
         chunk_whisper_words = []
-        if total_duration > 180.0 and total_chunks > 1:
+        if enable_whisper and total_duration > 180.0 and total_chunks > 1:
             try:
                 raw_cw = await asyncio.to_thread(get_whisper_word_timestamps, target_path, resolved_language)
                 for w in raw_cw:
