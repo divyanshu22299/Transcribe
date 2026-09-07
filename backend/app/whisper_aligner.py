@@ -23,35 +23,18 @@ try:
     ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
     if ffmpeg_bin and Path(ffmpeg_bin).exists():
         bin_dir = Path(ffmpeg_bin).parent
-        target_ffmpeg = bin_dir / "ffmpeg.exe"
-        if not target_ffmpeg.exists():
-            shutil.copyfile(ffmpeg_bin, target_ffmpeg)
+        target_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+        target_ffmpeg = bin_dir / target_name
+        if not target_ffmpeg.exists() and Path(ffmpeg_bin).name != target_name:
+            try:
+                shutil.copyfile(ffmpeg_bin, target_ffmpeg)
+                if os.name != "nt":
+                    target_ffmpeg.chmod(0o755)
+            except Exception:
+                pass
         bin_dir_str = str(bin_dir)
         if bin_dir_str not in os.environ.get("PATH", ""):
             os.environ["PATH"] = bin_dir_str + os.pathsep + os.environ.get("PATH", "")
-except Exception:
-    pass
-
-# Monkey-patch whisper.audio.load_audio so it uses soundfile directly without ffmpeg subprocess
-try:
-    import whisper.audio
-    def _safe_whisper_load_audio(file: str, sr: int = 16000):
-        try:
-            data, file_sr = sf.read(file, dtype="float32")
-            if len(data.shape) > 1:
-                data = data.mean(axis=1)
-            if file_sr != sr:
-                from scipy.signal import resample
-                num_samples = int(len(data) * sr / file_sr)
-                data = resample(data, num_samples).astype(np.float32)
-            return data
-        except Exception:
-            return _orig_load_audio(file, sr)
-
-    if hasattr(whisper.audio, "load_audio") and not hasattr(whisper.audio, "_orig_load_audio"):
-        _orig_load_audio = whisper.audio.load_audio
-        whisper.audio._orig_load_audio = _orig_load_audio
-        whisper.audio.load_audio = _safe_whisper_load_audio
 except Exception:
     pass
 
@@ -60,6 +43,36 @@ logger = logging.getLogger(__name__)
 # Module-level model cache
 _whisper_model = None
 _whisper_model_name = None
+_whisper_patched = False
+
+
+def _ensure_whisper_patched():
+    """Monkey-patch whisper.audio.load_audio lazily so it uses soundfile directly without ffmpeg subprocess."""
+    global _whisper_patched
+    if _whisper_patched:
+        return
+    try:
+        import whisper.audio
+        def _safe_whisper_load_audio(file: str, sr: int = 16000):
+            try:
+                data, file_sr = sf.read(file, dtype="float32")
+                if len(data.shape) > 1:
+                    data = data.mean(axis=1)
+                if file_sr != sr:
+                    from scipy.signal import resample
+                    num_samples = int(len(data) * sr / file_sr)
+                    data = resample(data, num_samples).astype(np.float32)
+                return data
+            except Exception:
+                return _orig_load_audio(file, sr)
+
+        if hasattr(whisper.audio, "load_audio") and not hasattr(whisper.audio, "_orig_load_audio"):
+            _orig_load_audio = whisper.audio.load_audio
+            whisper.audio._orig_load_audio = _orig_load_audio
+            whisper.audio.load_audio = _safe_whisper_load_audio
+        _whisper_patched = True
+    except Exception:
+        pass
 
 
 def log_terminal(msg: str):
@@ -68,20 +81,28 @@ def log_terminal(msg: str):
     print(f"[{now_str}] [Whisper Aligner] {msg}", flush=True)
 
 
-def load_whisper_model(model_name: str = "base"):
+def load_whisper_model(model_name: Optional[str] = None):
     """
     Lazy-load Whisper model and cache it globally.
-    The 'base' model is ~140MB and runs at ~2-4x realtime on CPU.
-    Downloaded to ~/.cache/whisper/ on first use.
+    Defaults to 'tiny' on cloud (Render 512MB RAM) and 'base' on local desktop.
     """
     global _whisper_model, _whisper_model_name
+
+    is_cloud = bool(os.getenv("RENDER") or os.getenv("PORT"))
+    if not model_name:
+        model_name = os.getenv("WHISPER_MODEL", "tiny" if is_cloud else "base")
 
     if _whisper_model is not None and _whisper_model_name == model_name:
         return _whisper_model
 
+    _ensure_whisper_patched()
+
     try:
         import whisper
-        log_terminal(f"Loading Whisper '{model_name}' model (CPU)...")
+        import torch
+        torch.set_num_threads(2 if is_cloud else (os.cpu_count() or 4))
+
+        log_terminal(f"Loading Whisper '{model_name}' model (CPU, is_cloud={is_cloud})...")
         _whisper_model = whisper.load_model(model_name, device="cpu")
         _whisper_model_name = model_name
         log_terminal(f"Whisper '{model_name}' model loaded successfully.")
@@ -100,7 +121,7 @@ def load_whisper_model(model_name: str = "base"):
 def get_whisper_word_timestamps(
     audio_path: str,
     language: Optional[str] = None,
-    model_name: str = "base"
+    model_name: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
     Run Whisper on the full audio file and extract word-level timestamps.

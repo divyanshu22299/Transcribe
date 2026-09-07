@@ -1169,16 +1169,17 @@ def generate_subtitles(
     dual_ch_info = detect_dual_channel_layout(audio_path_out)
     is_dual_channel = dual_ch_info.get("is_dual_channel", False)
     
-    # 6. Run Whisper on audio for word-level timestamps (guarded for cloud 512MB RAM)
+    # 6. Run Whisper on audio for word-level timestamps (guarded for cloud 512MB RAM using tiny model)
     is_cloud = bool(os.getenv("RENDER") or os.getenv("PORT"))
-    enable_whisper = os.getenv("ENABLE_WHISPER", "false" if is_cloud else "true").lower() == "true"
+    enable_whisper = os.getenv("ENABLE_WHISPER", "true").lower() == "true"
+    whisper_model = os.getenv("WHISPER_MODEL", "tiny" if is_cloud else "base")
     whisper_words = []
     if enable_whisper and total_duration <= 180.0:
         if progress_callback:
-            progress_callback("Whisper Alignment", 20, "Extracting word-level timestamps with Whisper...")
-        log_terminal("Running Whisper for precise timestamp extraction...")
+            progress_callback("Whisper Alignment", 20, f"Extracting word-level timestamps with Whisper ({whisper_model})...")
+        log_terminal(f"Running Whisper ({whisper_model}) for precise timestamp extraction...")
         try:
-            whisper_words = get_whisper_word_timestamps(audio_path_out, language=resolved_language)
+            whisper_words = get_whisper_word_timestamps(audio_path_out, language=resolved_language, model_name=whisper_model)
             log_terminal(f"Whisper produced {len(whisper_words)} word timestamps for alignment.")
         except Exception as e:
             log_terminal(f"WARNING: Whisper failed ({e}), will use Gemini timestamps as fallback.")
@@ -1342,7 +1343,7 @@ def generate_subtitles(
             # For long audio (> 180s), extract Whisper words on this slice with resolved language (if enabled)
             if enable_whisper and total_duration > 180.0 and len(chunks) > 1:
                 try:
-                    cw = get_whisper_word_timestamps(target_path, language=resolved_language)
+                    cw = get_whisper_word_timestamps(target_path, language=resolved_language, model_name=whisper_model)
                     for w in cw:
                         w["start"] = round(w["start"] + chunk_s, 3)
                         w["end"] = round(w["end"] + chunk_s, 3)
@@ -1499,31 +1500,33 @@ async def generate_subtitles_stream(
         dual_ch_info = await asyncio.to_thread(detect_dual_channel_layout, audio_path_out)
         is_dual_channel = dual_ch_info.get("is_dual_channel", False)
         
-        # 3. Run Whisper on audio for word-level timestamps (skipped on cloud/memory-constrained environments)
+        # 3. Run Whisper on audio for word-level timestamps (using lightweight tiny model on cloud)
         is_cloud = bool(os.getenv("RENDER") or os.getenv("PORT"))
-        enable_whisper = os.getenv("ENABLE_WHISPER", "false" if is_cloud else "true").lower() == "true"
+        enable_whisper = os.getenv("ENABLE_WHISPER", "true").lower() == "true"
+        whisper_model = os.getenv("WHISPER_MODEL", "tiny" if is_cloud else "base")
         whisper_words = []
         if enable_whisper and total_duration <= 180.0:
-            log_terminal("Running Whisper for precise timestamp extraction...")
-            yield f"data: {json.dumps({'type': 'progress', 'chunk_index': 0, 'total_chunks': 0, 'stage': 'Extracting word-level timestamps with Whisper...'})}\n\n"
+            log_terminal(f"Running Whisper ({whisper_model}) for precise timestamp extraction...")
+            yield f"data: {json.dumps({'type': 'progress', 'chunk_index': 0, 'total_chunks': 0, 'stage': f'Extracting word-level timestamps with Whisper ({whisper_model})...'})}\n\n"
             try:
                 async for item in execute_task_with_heartbeats(
                     get_whisper_word_timestamps,
                     audio_path_out,
                     resolved_language,
+                    whisper_model,
                     chunk_idx=0,
                     total_chunks=0,
-                    stage="Whisper word-level timestamp extraction"
+                    stage=f"Whisper ({whisper_model}) word-level timestamp extraction"
                 ):
                     if isinstance(item, tuple) and item[0] == "__RESULT__":
                         whisper_words = item[1]
                     else:
                         yield item
-                log_terminal(f"Whisper produced {len(whisper_words)} word timestamps for alignment.")
+                log_terminal(f"Whisper ({whisper_model}) produced {len(whisper_words)} word timestamps for alignment.")
             except Exception as e:
                 log_terminal(f"WARNING: Whisper failed ({e}), will use Gemini timestamps as fallback.")
         elif not enable_whisper:
-            log_terminal("Cloud instance / Fast mode: using Gemini native millisecond audio timestamps for ultra-fast generation.")
+            log_terminal("Whisper disabled via ENABLE_WHISPER=false. Using Gemini native millisecond audio timestamps.")
         
         # 4. Chunk audio: 90s target chunks (1.5 minutes) for fast 8-15s batch delivery!
         if total_duration > 60.0:
@@ -1580,9 +1583,10 @@ async def generate_subtitles_stream(
                             get_whisper_word_timestamps,
                             target_path,
                             resolved_language,
+                            whisper_model,
                             chunk_idx=chunk_idx,
                             total_chunks=total_chunks,
-                            stage=f"Whisper aligning Part {chunk_idx}"
+                            stage=f"Whisper ({whisper_model}) aligning Part {chunk_idx}"
                         ):
                             if isinstance(item, tuple) and item[0] == "__RESULT__":
                                 raw_cw = item[1]
@@ -1791,7 +1795,7 @@ async def generate_subtitles_stream(
                 # Stage 3: Whisper Acoustic Synchronization (preserving overlapping dialogues)
                 active_words = chunk_whisper_words if chunk_whisper_words else [w for w in whisper_words if w["start"] >= chunk_s - 0.5 and w["end"] <= chunk_e + 0.5]
                 if active_words and split_batch:
-                    log_terminal(f"Batch {chunk_idx}: Synchronizing {len(split_batch)} events acoustically with Whisper...")
+                    log_terminal(f"Batch {chunk_idx}: Synchronizing {len(split_batch)} events acoustically with Whisper ({whisper_model})...")
                     split_batch = align_subtitle_timestamps(split_batch, active_words, search_radius=8.0, prev_batch_end=prev_batch_end)
                 
                 # Stage 4: Non-destructive Netflix polish

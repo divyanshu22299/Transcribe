@@ -2,6 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { X, Download, FileText, FileCode, File, Globe, Check, AlertTriangle } from 'lucide-react';
 import { API_BASE } from '../../config';
 
+import { exportSrtLocally, exportVttLocally, exportTtmlLocally, exportTxtLocally, downloadLocally } from '../../utils/localExporter';
+
 const EXPORT_FORMATS = [
   {
     key: 'ttml',
@@ -64,32 +66,58 @@ export default function SubtitleExportModal({ isOpen, onClose, events = [], file
     setIsExporting(true);
 
     try {
-      const response = await fetch(`${API_BASE}/api/subtitle/export`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          events: events,
-          filename: exportFilename,
-          format: selectedFormat,
-          language: 'en',
-        }),
-      });
+      let content = '';
+      let mimeType = 'text/plain;charset=utf-8';
 
-      if (!response.ok) throw new Error('Export failed');
+      if (selectedFormat === 'srt') {
+        content = exportSrtLocally(events);
+        mimeType = 'text/plain;charset=utf-8';
+      } else if (selectedFormat === 'vtt') {
+        content = exportVttLocally(events);
+        mimeType = 'text/vtt;charset=utf-8';
+      } else if (selectedFormat === 'ttml') {
+        content = exportTtmlLocally(events, 'en');
+        mimeType = 'application/xml;charset=utf-8';
+      } else if (selectedFormat === 'txt') {
+        content = exportTxtLocally(events);
+        mimeType = 'text/plain;charset=utf-8';
+      } else {
+        content = exportSrtLocally(events);
+      }
 
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${exportFilename}${selectedFormatInfo?.ext || '.srt'}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const ext = selectedFormatInfo?.ext || '.srt';
+      downloadLocally(content, `${exportFilename}${ext}`, mimeType);
       onClose();
     } catch (err) {
-      console.error('Export error:', err);
-      alert('Export failed. Please verify the backend connection.');
+      console.warn('Local export error, attempting backend fallback:', err);
+      try {
+        const response = await fetch(`${API_BASE}/api/subtitle/export`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            events: events,
+            filename: exportFilename,
+            format: selectedFormat,
+            language: 'en',
+          }),
+        });
+
+        if (!response.ok) throw new Error('Export failed');
+
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${exportFilename}${selectedFormatInfo?.ext || '.srt'}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        onClose();
+      } catch (backupErr) {
+        console.error('Export error:', backupErr);
+        alert('Export failed. Please verify the backend connection.');
+      }
     } finally {
       setIsExporting(false);
     }

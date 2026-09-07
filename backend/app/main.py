@@ -1415,14 +1415,15 @@ async def gemini_fix_subtitles_endpoint(payload: dict):
 
     whisper_words = None
     is_cloud = bool(os.getenv("RENDER") or os.getenv("PORT"))
-    enable_whisper = os.getenv("ENABLE_WHISPER", "false" if is_cloud else "true").lower() == "true"
+    enable_whisper = os.getenv("ENABLE_WHISPER", "true").lower() == "true"
+    whisper_model = os.getenv("WHISPER_MODEL", "tiny" if is_cloud else "base")
     if enable_whisper and video_id:
         video_path = resolve_active_session_video(video_id) or ""
         audio_path = os.path.splitext(video_path)[0] + ".wav" if video_path else ""
         if os.path.exists(audio_path):
             try:
                 from app.whisper_aligner import get_whisper_word_timestamps
-                whisper_words = await asyncio.to_thread(get_whisper_word_timestamps, audio_path)
+                whisper_words = await asyncio.to_thread(get_whisper_word_timestamps, audio_path, None, whisper_model)
             except Exception:
                 pass
 
