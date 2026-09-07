@@ -14,6 +14,45 @@ import NetflixQCPanel from './NetflixQCPanel';
 import SubtitleExportModal from './SubtitleExportModal';
 import SubtitleDiffModal from './SubtitleDiffModal';
 import SubtitleSettingsModal from './SubtitleSettingsModal';
+import { extractAudioFromMedia, computeWaveformPeaks } from '../../utils/audioExtractor';
+
+// Sliced multi-part chunked upload for files > 90MB (bypasses Cloudflare 100MB proxy limits)
+async function uploadFileInChunks(file, apiBase, onProgress) {
+  const chunkSize = 15 * 1024 * 1024; // 15 MB slices
+  const totalChunks = Math.ceil(file.size / chunkSize);
+  const uploadId = 'up_' + Math.random().toString(36).substring(2, 10);
+
+  let lastData = null;
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * chunkSize;
+    const end = Math.min(file.size, start + chunkSize);
+    const chunkBlob = file.slice(start, end);
+
+    const formData = new FormData();
+    formData.append('chunk', chunkBlob, file.name);
+    formData.append('upload_id', uploadId);
+    formData.append('chunk_index', i.toString());
+    formData.append('total_chunks', totalChunks.toString());
+    formData.append('filename', file.name);
+
+    if (onProgress) {
+      const pct = Math.round(((i + 1) / totalChunks) * 100);
+      onProgress({ percent: pct, detail: `Uploading slice ${i + 1}/${totalChunks}...` });
+    }
+
+    const res = await fetch(`${apiBase}/api/subtitle/upload_chunk`, {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error(err?.detail || `Chunk upload failed at slice ${i + 1}/${totalChunks}`);
+    }
+    lastData = await res.json();
+  }
+  return lastData;
+}
 
 export default function SubtitleApp({ onBackToHome }) {
   // ── Theme State: Unified Dark Creative Suite ──
@@ -26,6 +65,7 @@ export default function SubtitleApp({ onBackToHome }) {
   const [videoDuration, setVideoDuration] = useState(0);
   const [currentVideoId, setCurrentVideoId] = useState(null);
   const [initialWaveformPeaks, setInitialWaveformPeaks] = useState([]);
+  const [audioExtractionStatus, setAudioExtractionStatus] = useState(null); // { stage, percent, detail }
 
   const isAudioFile = useMemo(() => {
     if (!selectedFile) return false;
@@ -34,6 +74,86 @@ export default function SubtitleApp({ onBackToHome }) {
       /\.(mp3|wav|m4a|aac|flac|ogg|opus|wma)$/i.test(selectedFile.name || '')
     );
   }, [selectedFile]);
+
+  // Robust Client-Side Audio Extractor & Adaptive Upload Coordinator
+  const processAndUploadMedia = useCallback(async (fileToProcess, isAudio) => {
+    let uploadTarget = fileToProcess;
+
+    // 1. If video file, extract lightweight mono audio track in browser first!
+    if (!isAudio) {
+      try {
+        setAudioExtractionStatus({ stage: 'extracting', percent: 20, detail: 'Extracting audio in browser...' });
+        const extracted = await extractAudioFromMedia(fileToProcess, (p) => {
+          setAudioExtractionStatus({ stage: 'extracting', ...p });
+        });
+        if (extracted.peaks && extracted.peaks.length > 0) {
+          setInitialWaveformPeaks(extracted.peaks);
+        }
+        uploadTarget = extracted.audioFile;
+      } catch (extErr) {
+        console.warn("Client audio extraction fallback:", extErr);
+        uploadTarget = fileToProcess;
+      }
+    } else {
+      // For audio files, extract peaks locally for instant waveform rendering
+      try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        const audioCtx = new AudioContextClass();
+        const buf = await fileToProcess.arrayBuffer();
+        const decoded = await audioCtx.decodeAudioData(buf);
+        audioCtx.close().catch(() => {});
+        const channel = decoded.getChannelData(0);
+        const peaks = computeWaveformPeaks(channel, decoded.duration, 50);
+        if (peaks.length > 0) {
+          setInitialWaveformPeaks(peaks);
+        }
+      } catch (_) {}
+    }
+
+    // 2. Upload to backend (chunked if > 90MB, direct otherwise)
+    try {
+      if (uploadTarget.size > 90 * 1024 * 1024) {
+        setAudioExtractionStatus({ stage: 'uploading', percent: 10, detail: 'Uploading via chunked slices...' });
+        const chunkData = await uploadFileInChunks(uploadTarget, API_BASE, (p) => {
+          setAudioExtractionStatus({ stage: 'uploading', ...p });
+        });
+        if (chunkData?.video_id) {
+          setCurrentVideoId(chunkData.video_id);
+          if (chunkData.peaks && chunkData.peaks.length > 0) {
+            setInitialWaveformPeaks(chunkData.peaks);
+          }
+          return chunkData.video_id;
+        }
+      } else {
+        setAudioExtractionStatus({ stage: 'uploading', percent: 50, detail: 'Transferring audio to server...' });
+        const formData = new FormData();
+        formData.append('file', uploadTarget);
+        const res = await fetch(`${API_BASE}/api/subtitle/upload`, {
+          method: 'POST',
+          body: formData
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.video_id) {
+            setCurrentVideoId(data.video_id);
+            if (data.peaks && data.peaks.length > 0) {
+              setInitialWaveformPeaks(data.peaks);
+            }
+            return data.video_id;
+          }
+        } else {
+          const errData = await res.json().catch(() => null);
+          throw new Error(errData?.detail || `Upload failed (Status: ${res.status})`);
+        }
+      }
+    } catch (err) {
+      console.warn("Media upload failed:", err);
+      throw err;
+    } finally {
+      setAudioExtractionStatus(null);
+    }
+    return null;
+  }, []);
 
   // Subtitle Dataset State
   const [events, setEvents] = useState([]);
@@ -552,31 +672,8 @@ export default function SubtitleApp({ onBackToHome }) {
         setVideoDuration(mediaElem.duration || 0);
       };
 
-      // Upload in background immediately so backend pre-extracts audio and serves true waveform peaks
-      const bgUpload = async (f) => {
-        try {
-          const formData = new FormData();
-          formData.append('file', f);
-          const res = await fetch(`${API_BASE}/api/subtitle/upload`, {
-            method: 'POST',
-            body: formData
-          });
-          if (res.ok) {
-            const data = await res.json();
-            if (data.video_id) {
-              setCurrentVideoId(data.video_id);
-              if (data.peaks && data.peaks.length > 0) {
-                setInitialWaveformPeaks(data.peaks);
-              }
-              return data.video_id;
-            }
-          }
-        } catch (err) {
-          console.warn("Background upload for waveform:", err);
-        }
-        return null;
-      };
-      uploadPromiseRef.current = bgUpload(file);
+      // Upload in background immediately with client audio extraction and waveform generation
+      uploadPromiseRef.current = processAndUploadMedia(file, isAudio).catch(() => null);
 
       // Reset subtitle canvas for clean state
       setEvents([]);
@@ -833,22 +930,15 @@ export default function SubtitleApp({ onBackToHome }) {
       }
 
       if (!videoId) {
-        const formData = new FormData();
-        formData.append('file', selectedFile);
-        
-        console.log("[Subtitle Studio] Uploading video container to backend...");
-        const uploadRes = await fetch(`${API_BASE}/api/subtitle/upload`, {
-          method: 'POST',
-          body: formData
-        });
-        
-        if (!uploadRes.ok) {
-          const errJson = await uploadRes.json().catch(() => null);
-          throw new Error(errJson?.detail || `Video upload failed (Status: ${uploadRes.status})`);
+        setProgressPercent(12);
+        setProgressStage('Transferring Audio to Server');
+        setProgressDetail('Extracting audio track & uploading...');
+        videoId = await processAndUploadMedia(selectedFile, isAudioFile);
+        if (videoId) {
+          setCurrentVideoId(videoId);
+        } else {
+          throw new Error('Could not transfer media to server.');
         }
-        const uploadData = await uploadRes.json();
-        videoId = uploadData.video_id;
-        setCurrentVideoId(videoId);
       }
 
       setProgressPercent(20);
@@ -1461,6 +1551,19 @@ export default function SubtitleApp({ onBackToHome }) {
           >
             Configure API URL
           </button>
+        </div>
+      )}
+
+      {/* Client Audio Extraction & Fast Cloud Transfer Progress Banner */}
+      {audioExtractionStatus && (
+        <div className="px-4 py-2 flex items-center justify-between border-b border-cyan-800/60 bg-cyan-950/90 text-cyan-200 text-xs shrink-0 z-30 transition-all animate-pulse">
+          <div className="flex items-center gap-2">
+            <Loader2 className="w-4 h-4 text-cyan-400 animate-spin shrink-0" />
+            <span>
+              <strong>⚡ Fast Cloud Transfer:</strong> {audioExtractionStatus.detail || 'Extracting lightweight audio from video...'} ({audioExtractionStatus.percent || 0}%)
+            </span>
+          </div>
+          <span className="text-[11px] text-cyan-300 font-mono hidden sm:inline">Bypassing 100MB cloud limits</span>
         </div>
       )}
 

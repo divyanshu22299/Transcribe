@@ -336,7 +336,7 @@ export default function AudioWaveformTimeline({
 
     loadWaveform();
     return () => { isCancelled = true; };
-  }, [videoId, videoUrl, selectedFile, API_BASE]);
+  }, [videoId, videoUrl, selectedFile, initialPeaks, API_BASE]);
 
   // ── 2. Viewport-Based Acoustic Waveform Renderer (Supports 40+ min media without canvas crashes) ──
   const drawWaveform = useCallback(() => {

@@ -958,7 +958,17 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
     try:
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        
+    except Exception as e:
+        if file_path.exists():
+            file_path.unlink()
+        raise HTTPException(status_code=500, detail=f"Error writing media upload: {str(e)}")
+
+    return await _process_saved_media(file_path, safe_filename, clean_stem, raw_stem, ext)
+
+
+async def _process_saved_media(file_path: Path, safe_filename: str, clean_stem: str, raw_stem: str, ext: str):
+    """Validate media, resolve audio, precalculate waveform and register active session."""
+    try:
         val = validate_media_file(str(file_path))
         if not val["is_valid"]:
             if file_path.exists():
@@ -1044,6 +1054,58 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
         "peaks": peaks_payload,
         "points_per_sec": 50
     }
+
+
+@app.post("/api/subtitle/upload_chunk")
+async def upload_video_chunk(
+    request: Request,
+    chunk: UploadFile = File(...),
+    upload_id: str = Form(...),
+    chunk_index: int = Form(...),
+    total_chunks: int = Form(...),
+    filename: str = Form(...)
+):
+    """Receive sliced file chunk (<=20MB) to bypass cloud proxy request limits seamlessly."""
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    _check_rate_limit(client_ip)
+
+    ext = Path(filename).suffix.lower()
+    if ext not in get_supported_media_extensions():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported format {ext}. Supported formats: {', '.join(sorted(get_supported_media_extensions()))}"
+        )
+
+    clean_upload_id = re.sub(r'[^\w\.-]', '_', upload_id).strip()
+    raw_stem = Path(filename).stem
+    clean_stem = re.sub(r'[^\w\.-]', '_', raw_stem).strip()
+    clean_stem = re.sub(r'_+', '_', clean_stem)
+    safe_filename = f"{clean_upload_id}_{clean_stem}{ext}"
+    part_path = UPLOAD_DIR / f"{safe_filename}.part"
+
+    # Append chunk data to .part file
+    mode = "ab" if (chunk_index > 0 and part_path.exists()) else "wb"
+    try:
+        with open(part_path, mode) as buffer:
+            shutil.copyfileobj(chunk.file, buffer)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error writing chunk {chunk_index}: {e}")
+
+    # Not last chunk yet - acknowledge receipt
+    if chunk_index < total_chunks - 1:
+        return {
+            "status": "chunk_received",
+            "chunk_index": chunk_index,
+            "total_chunks": total_chunks
+        }
+
+    # Final chunk reached: finalize file and run full media processing
+    final_file_path = UPLOAD_DIR / safe_filename
+    if final_file_path.exists():
+        final_file_path.unlink()
+    part_path.rename(final_file_path)
+
+    return await _process_saved_media(final_file_path, safe_filename, clean_stem, raw_stem, ext)
 
 
 def resolve_active_session_video(video_id: str) -> Optional[str]:
