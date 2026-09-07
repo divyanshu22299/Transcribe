@@ -1169,9 +1169,11 @@ def generate_subtitles(
     dual_ch_info = detect_dual_channel_layout(audio_path_out)
     is_dual_channel = dual_ch_info.get("is_dual_channel", False)
     
-    # 6. Run Whisper on audio for word-level timestamps
+    # 6. Run Whisper on audio for word-level timestamps (guarded for cloud 512MB RAM)
+    is_cloud = bool(os.getenv("RENDER") or os.getenv("PORT"))
+    enable_whisper = os.getenv("ENABLE_WHISPER", "false" if is_cloud else "true").lower() == "true"
     whisper_words = []
-    if total_duration <= 180.0:
+    if enable_whisper and total_duration <= 180.0:
         if progress_callback:
             progress_callback("Whisper Alignment", 20, "Extracting word-level timestamps with Whisper...")
         log_terminal("Running Whisper for precise timestamp extraction...")
@@ -1180,6 +1182,8 @@ def generate_subtitles(
             log_terminal(f"Whisper produced {len(whisper_words)} word timestamps for alignment.")
         except Exception as e:
             log_terminal(f"WARNING: Whisper failed ({e}), will use Gemini timestamps as fallback.")
+    elif not enable_whisper:
+        log_terminal("Cloud instance / Fast mode: using Gemini native millisecond audio timestamps.")
     
     # 7. Chunk long audio: 180s target chunks (3 minutes) preserves full conversational context
     if total_duration > 75.0:
@@ -1335,8 +1339,8 @@ def generate_subtitles(
             if len(rolling_context) > 10:
                 rolling_context = rolling_context[-10:]
                     
-            # For long audio (> 180s), extract Whisper words on this slice with resolved language
-            if total_duration > 180.0 and len(chunks) > 1:
+            # For long audio (> 180s), extract Whisper words on this slice with resolved language (if enabled)
+            if enable_whisper and total_duration > 180.0 and len(chunks) > 1:
                 try:
                     cw = get_whisper_word_timestamps(target_path, language=resolved_language)
                     for w in cw:

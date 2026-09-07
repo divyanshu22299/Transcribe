@@ -18,7 +18,7 @@ import { extractAudioFromMedia, computeWaveformPeaks } from '../../utils/audioEx
 
 // Sliced multi-part chunked upload for files > 90MB (bypasses Cloudflare 100MB proxy limits)
 async function uploadFileInChunks(file, apiBase, onProgress) {
-  const chunkSize = 15 * 1024 * 1024; // 15 MB slices
+  const chunkSize = 12 * 1024 * 1024; // 12 MB slices (safe for any proxy/cloud gateway)
   const totalChunks = Math.ceil(file.size / chunkSize);
   const uploadId = 'up_' + Math.random().toString(36).substring(2, 10);
 
@@ -40,16 +40,45 @@ async function uploadFileInChunks(file, apiBase, onProgress) {
       onProgress({ percent: pct, detail: `Uploading slice ${i + 1}/${totalChunks}...` });
     }
 
-    const res = await fetch(`${apiBase}/api/subtitle/upload_chunk`, {
-      method: 'POST',
-      body: formData
-    });
+    let success = false;
+    let lastErr = null;
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      try {
+        const res = await fetch(`${apiBase}/api/subtitle/upload_chunk`, {
+          method: 'POST',
+          body: formData
+        });
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => null);
-      throw new Error(err?.detail || `Chunk upload failed at slice ${i + 1}/${totalChunks}`);
+        if (res.ok) {
+          lastData = await res.json();
+          success = true;
+          break;
+        } else {
+          const err = await res.json().catch(() => null);
+          lastErr = new Error(err?.detail || `Slice ${i + 1}/${totalChunks} failed with status ${res.status}`);
+          if (res.status >= 500 || res.status === 429) {
+            await new Promise(r => setTimeout(r, attempt * 1500));
+            continue;
+          } else {
+            throw lastErr;
+          }
+        }
+      } catch (fetchErr) {
+        lastErr = fetchErr;
+        if (attempt < 4) {
+          if (onProgress) {
+            onProgress({ 
+              percent: Math.round(((i) / totalChunks) * 100), 
+              detail: `Server connecting (attempt ${attempt}/4)... Retrying slice ${i + 1}/${totalChunks}...` 
+            });
+          }
+          await new Promise(r => setTimeout(r, attempt * 2500));
+        }
+      }
     }
-    lastData = await res.json();
+    if (!success) {
+      throw lastErr || new Error(`Upload failed at slice ${i + 1}/${totalChunks}`);
+    }
   }
   return lastData;
 }
@@ -117,7 +146,7 @@ export default function SubtitleApp({ onBackToHome }) {
       } catch (_) {}
     }
 
-    // 2. Upload to backend (chunked if > 20MB, direct otherwise)
+    // 2. Upload to backend (chunked if > 20MB or if direct upload fails)
     try {
       if (uploadTarget.size > 20 * 1024 * 1024) {
         setAudioExtractionStatus({ stage: 'uploading', percent: 10, detail: 'Uploading via chunked slices...' });
@@ -133,24 +162,42 @@ export default function SubtitleApp({ onBackToHome }) {
         }
       } else {
         setAudioExtractionStatus({ stage: 'uploading', percent: 50, detail: 'Transferring audio to server...' });
-        const formData = new FormData();
-        formData.append('file', uploadTarget);
-        const res = await fetch(`${API_BASE}/api/subtitle/upload`, {
-          method: 'POST',
-          body: formData
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.video_id) {
-            setCurrentVideoId(data.video_id);
-            if (data.peaks && data.peaks.length > 0) {
-              setInitialWaveformPeaks(data.peaks);
+        let uploadSucceeded = false;
+        try {
+          const formData = new FormData();
+          formData.append('file', uploadTarget);
+          const res = await fetch(`${API_BASE}/api/subtitle/upload`, {
+            method: 'POST',
+            body: formData
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.video_id) {
+              setCurrentVideoId(data.video_id);
+              if (data.peaks && data.peaks.length > 0) {
+                setInitialWaveformPeaks(data.peaks);
+              }
+              uploadSucceeded = true;
+              return data.video_id;
             }
-            return data.video_id;
           }
-        } else {
-          const errData = await res.json().catch(() => null);
-          throw new Error(errData?.detail || `Upload failed (Status: ${res.status})`);
+        } catch (directErr) {
+          console.warn("Direct upload failed, falling back to sliced chunk upload:", directErr);
+        }
+
+        // Automatic fallback to chunked upload if direct POST encounters payload/network limitations
+        if (!uploadSucceeded) {
+          console.log("[Subtitle Studio] Fallback: uploading media in resilient sliced chunks...");
+          const chunkData = await uploadFileInChunks(uploadTarget, API_BASE, (p) => {
+            setAudioExtractionStatus({ stage: 'uploading', ...p });
+          });
+          if (chunkData?.video_id) {
+            setCurrentVideoId(chunkData.video_id);
+            if (chunkData.peaks && chunkData.peaks.length > 0) {
+              setInitialWaveformPeaks(chunkData.peaks);
+            }
+            return chunkData.video_id;
+          }
         }
       }
     } catch (err) {
@@ -681,7 +728,7 @@ export default function SubtitleApp({ onBackToHome }) {
       };
 
       // Upload in background immediately with client audio extraction and waveform generation
-      uploadPromiseRef.current = processAndUploadMedia(file, isAudio).catch(() => null);
+      uploadPromiseRef.current = processAndUploadMedia(file, isAudio);
 
       // Reset subtitle canvas for clean state
       setEvents([]);
@@ -926,12 +973,34 @@ export default function SubtitleApp({ onBackToHome }) {
     }, 200);
 
     try {
+      // Preflight server wake-up check (Render free tier cold start handler)
+      setProgressPercent(6);
+      setProgressStage('Connecting to Server');
+      setProgressDetail('Checking backend connection...');
+      for (let attempt = 1; attempt <= 12; attempt++) {
+        try {
+          const ctrl = new AbortController();
+          const tId = setTimeout(() => ctrl.abort(), 3500);
+          const ping = await fetch(`${API_BASE}/api/health`, { method: 'GET', signal: ctrl.signal });
+          clearTimeout(tId);
+          if (ping.ok) {
+            break;
+          }
+        } catch (_) {}
+        setProgressDetail(`Server is waking up (Render boot: ${attempt * 3}s)... please wait`);
+        await new Promise(r => setTimeout(r, 3000));
+      }
+
       let videoId = currentVideoId;
       if (!videoId && uploadPromiseRef.current) {
         setProgressPercent(10);
         setProgressStage('Finalizing Media Transfer');
         setProgressDetail('Waiting for background media upload to finish...');
-        videoId = await uploadPromiseRef.current;
+        try {
+          videoId = await uploadPromiseRef.current;
+        } catch (e) {
+          console.warn("Background upload failed, will upload directly:", e);
+        }
         if (videoId) {
           setCurrentVideoId(videoId);
         }
@@ -940,7 +1009,7 @@ export default function SubtitleApp({ onBackToHome }) {
       if (!videoId) {
         setProgressPercent(12);
         setProgressStage('Transferring Audio to Server');
-        setProgressDetail('Extracting audio track & uploading...');
+        setProgressDetail('Transferring media to server...');
         videoId = await processAndUploadMedia(selectedFile, isAudioFile);
         if (videoId) {
           setCurrentVideoId(videoId);
@@ -1117,18 +1186,11 @@ export default function SubtitleApp({ onBackToHome }) {
                         err.message?.includes('Network error') ||
                         err.message?.includes('Load failed');
       if (isNetwork) {
-        const isLarge = selectedFile && selectedFile.size > 95 * 1024 * 1024;
-        let hint = '';
-        if (isLarge) {
-          hint = `\n\n⚠️ File Size Limit: Your file is ${(selectedFile.size / (1024 * 1024)).toFixed(0)} MB. Cloud services (Render + Cloudflare) reject requests larger than 100 MB.\nSolution: Upload an audio file (.mp3, .wav, .m4a) instead of the full raw video, which is much smaller and processes faster.`;
-        } else {
-          hint = `\n\nTroubleshooting:\n1. Render Cold Start: Free-tier Render spins down after 15 mins. It takes ~50 seconds to boot up. Once live, try again.\n2. URL Check: In Settings ⚙️, make sure the Backend API URL is https://transcribe-qqwn.onrender.com (do not add /api).`;
-        }
         alert(
-          `Network Error: Cannot connect to Backend Server.\n\n` +
-          `Current API URL: ${API_BASE || '(relative / localhost)'}${hint}`
+          `Connection Notice: Backend Server is currently unreachable or waking up.\n\n` +
+          `Backend URL: ${API_BASE || '(relative / localhost)'}\n\n` +
+          `Render Free-Tier Notice: If the server was idle, it spins down and takes 30-50 seconds to boot. Once running, media uploads automatically in resilient sliced chunks. Please wait a moment and click 'Auto-Generate Subtitles' again.`
         );
-        setShowSettingsModal(true);
       } else {
         alert(`Error generating subtitles: ${err.message}`);
       }

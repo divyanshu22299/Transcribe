@@ -1371,7 +1371,9 @@ async def gemini_fix_subtitles_endpoint(payload: dict):
     shot_changes = payload.get("shot_changes", [])
 
     whisper_words = None
-    if video_id:
+    is_cloud = bool(os.getenv("RENDER") or os.getenv("PORT"))
+    enable_whisper = os.getenv("ENABLE_WHISPER", "false" if is_cloud else "true").lower() == "true"
+    if enable_whisper and video_id:
         video_path = resolve_active_session_video(video_id) or ""
         audio_path = os.path.splitext(video_path)[0] + ".wav" if video_path else ""
         if os.path.exists(audio_path):
