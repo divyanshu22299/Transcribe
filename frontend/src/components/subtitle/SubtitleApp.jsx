@@ -1600,6 +1600,7 @@ export default function SubtitleApp({ onBackToHome }) {
               <option value="ml" className="bg-[#181920]">Malayalam (മലയാളം)</option>
               <option value="ur" className="bg-[#181920]">Urdu (اردو)</option>
               <option value="es" className="bg-[#181920]">Spanish (Español)</option>
+              <option value="es-419" className="bg-[#181920]">Spanish (Latin America)</option>
               <option value="fr" className="bg-[#181920]">French (Français)</option>
               <option value="de" className="bg-[#181920]">German (Deutsch)</option>
               <option value="ja" className="bg-[#181920]">Japanese (日本語)</option>

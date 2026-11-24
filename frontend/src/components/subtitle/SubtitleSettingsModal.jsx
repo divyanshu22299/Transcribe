@@ -328,6 +328,7 @@ export default function SubtitleSettingsModal({
                   <option value="ml">Malayalam (മലയാളം)</option>
                   <option value="ur">Urdu (اردو)</option>
                   <option value="es">Spanish (Español)</option>
+                  <option value="es-419">Spanish (Latin America)</option>
                   <option value="fr">French (Français)</option>
                   <option value="de">German (Deutsch)</option>
                   <option value="ja">Japanese (日本語)</option>

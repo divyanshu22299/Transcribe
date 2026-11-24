@@ -238,6 +238,8 @@ def normalize_language_and_script(language: str, script: str = "auto") -> tuple:
         "urdu": ("Urdu", "Arabic"),
         "es": ("Spanish", "Latin"),
         "spanish": ("Spanish", "Latin"),
+        "es-419": ("Latin American Spanish", "Latin"),
+        "latin american spanish": ("Latin American Spanish", "Latin"),
         "fr": ("French", "Latin"),
         "french": ("French", "Latin"),
         "de": ("German", "Latin"),

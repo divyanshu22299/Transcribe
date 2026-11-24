@@ -216,6 +216,8 @@ def _map_language_to_whisper_code(language: str) -> Optional[str]:
         "assamese": "as",
         "nepali": "ne",
         "spanish": "es",
+        "es-419": "es",
+        "latin american spanish": "es",
         "french": "fr",
         "german": "de",
         "japanese": "ja",
